@@ -1,0 +1,22 @@
+[package]
+name = "blissify-rs"
+version = "0.1.0"
+authors = ["Polochon-street <polochonstreet@gmx.fr>"]
+edition = "2018"
+license = "GPL-3.0-only"
+description = "An MPD plugin for creating smart playlists"
+repository = "https://github.com/Polochon-street/blissify-rs"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bliss-rs = "0.1.1"
+mpd = "0.0.12"
+rusqlite = "0.25.0"
+dirs = "3.0.1"
+tempdir = "0.3.7"
+clap = "2.33.3"
+anyhow = "1.0.40"
+log = "0.4.14"
+env_logger = "0.8.3"
