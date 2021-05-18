@@ -7,12 +7,11 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_rs::library::Library;
-use bliss_rs::{BlissError, Song};
+use bliss_audio::Library;
+use bliss_audio::{BlissError, Song};
 use clap::{App, Arg, ArgGroup};
 #[cfg(not(test))]
 use dirs::data_local_dir;
-use env_logger;
 use log::info;
 #[cfg(not(test))]
 use log::warn;
@@ -88,11 +87,13 @@ impl MPDLibrary {
         )?;
         let results = stmt.query_map(params![&path.to_str().unwrap()], MPDLibrary::row_closure)?;
 
-        let mut song = Song::default();
-        song.path = path
-            .to_str()
-            .with_context(|| "While getting current song path")?
-            .to_owned();
+        let mut song = Song {
+            path: path
+                .to_str()
+                .with_context(|| "While getting current song path")?
+                .to_owned(),
+            ..Default::default()
+        };
         let mut analysis = vec![];
         for result in results {
             analysis.push(result?.1);
@@ -230,14 +231,14 @@ impl Library for MPDLibrary {
         let mut songs_hashmap = HashMap::new();
         for result in results {
             let result = result.map_err(|e| BlissError::ProviderError(e.to_string()))?;
-            let song_entry = songs_hashmap.entry(result.0).or_insert(vec![]);
+            let song_entry = songs_hashmap.entry(result.0).or_insert_with(Vec::new);
             song_entry.push(result.1);
         }
         let songs: Vec<Song> = songs_hashmap
             .into_iter()
             .map(|(path, analysis)| Song {
-                analysis,
                 path,
+                analysis,
                 ..Default::default()
             })
             .collect();
@@ -445,69 +446,68 @@ mod test {
     }
 
     #[test]
-//    fn test_full_rescan() {
-//        let mut library = MPDLibrary::new(String::from("./data/")).unwrap();
-//        let sqlite_conn = library.sqlite_conn.lock().unwrap();
-//        sqlite_conn
-//            .execute(
-//                "
-//            insert into song (id, path, analyzed) values
-//                (1,'./data/s16_mono_22_5kHz.flac', true)
-//            ",
-//                [],
-//            )
-//            .unwrap();
-//
-//        sqlite_conn
-//            .execute(
-//                "
-//            insert into feature (song_id, feature, feature_index) values
-//                (1, 0., 1),
-//                (1, 0., 2),
-//                (1, 0., 3)
-//            ",
-//                [],
-//            )
-//            .unwrap();
-//        drop(sqlite_conn);
-//
-//        library.full_rescan().unwrap();
-//
-//        let sqlite_conn = library.sqlite_conn.lock().unwrap();
-//        let mut stmt = sqlite_conn
-//            .prepare("select path, analyzed from song order by path")
-//            .unwrap();
-//        let expected_songs = stmt
-//            .query_map([], |row| Ok((row.get(0).unwrap(), row.get(1).unwrap())))
-//            .unwrap()
-//            .map(|x| {
-//                let x = x.unwrap();
-//                (x.0, x.1)
-//            })
-//            .collect::<Vec<(String, bool)>>();
-//
-//        assert_eq!(
-//            expected_songs,
-//            vec![
-//                (String::from("foo"), false),
-//                (String::from("s16_mono_22_5kHz.flac"), true),
-//                (String::from("s16_stereo_22_5kHz.flac"), true),
-//            ],
-//        );
-//
-//        let mut stmt = sqlite_conn
-//            .prepare("select count(*) from feature group by song_id")
-//            .unwrap();
-//        let expected_feature_count = stmt
-//            .query_map([], |row| row.get(0))
-//            .unwrap()
-//            .map(|x| x.unwrap())
-//            .collect::<Vec<u32>>();
-//        for feature_count in expected_feature_count {
-//            assert!(feature_count > 1);
-//        }
-//    }
-
+    //    fn test_full_rescan() {
+    //        let mut library = MPDLibrary::new(String::from("./data/")).unwrap();
+    //        let sqlite_conn = library.sqlite_conn.lock().unwrap();
+    //        sqlite_conn
+    //            .execute(
+    //                "
+    //            insert into song (id, path, analyzed) values
+    //                (1,'./data/s16_mono_22_5kHz.flac', true)
+    //            ",
+    //                [],
+    //            )
+    //            .unwrap();
+    //
+    //        sqlite_conn
+    //            .execute(
+    //                "
+    //            insert into feature (song_id, feature, feature_index) values
+    //                (1, 0., 1),
+    //                (1, 0., 2),
+    //                (1, 0., 3)
+    //            ",
+    //                [],
+    //            )
+    //            .unwrap();
+    //        drop(sqlite_conn);
+    //
+    //        library.full_rescan().unwrap();
+    //
+    //        let sqlite_conn = library.sqlite_conn.lock().unwrap();
+    //        let mut stmt = sqlite_conn
+    //            .prepare("select path, analyzed from song order by path")
+    //            .unwrap();
+    //        let expected_songs = stmt
+    //            .query_map([], |row| Ok((row.get(0).unwrap(), row.get(1).unwrap())))
+    //            .unwrap()
+    //            .map(|x| {
+    //                let x = x.unwrap();
+    //                (x.0, x.1)
+    //            })
+    //            .collect::<Vec<(String, bool)>>();
+    //
+    //        assert_eq!(
+    //            expected_songs,
+    //            vec![
+    //                (String::from("foo"), false),
+    //                (String::from("s16_mono_22_5kHz.flac"), true),
+    //                (String::from("s16_stereo_22_5kHz.flac"), true),
+    //            ],
+    //        );
+    //
+    //        let mut stmt = sqlite_conn
+    //            .prepare("select count(*) from feature group by song_id")
+    //            .unwrap();
+    //        let expected_feature_count = stmt
+    //            .query_map([], |row| row.get(0))
+    //            .unwrap()
+    //            .map(|x| x.unwrap())
+    //            .collect::<Vec<u32>>();
+    //        for feature_count in expected_feature_count {
+    //            assert!(feature_count > 1);
+    //        }
+    //    }
     #[test]
     fn test_playlist_no_song() {
         let library = MPDLibrary::new(String::from("")).unwrap();
