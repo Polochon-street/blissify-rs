@@ -1,11 +1,12 @@
 [package]
 name = "blissify"
-version = "0.1.3"
+version = "0.1.5"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2018"
 license = "GPL-3.0-only"
 description = "An MPD plugin for creating smart playlists"
 repository = "https://github.com/Polochon-street/blissify-rs"
+keywords = ["audio", "song", "similarity", "playlist"]
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

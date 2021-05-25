@@ -321,9 +321,13 @@ impl Library for MPDLibrary {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
-    let matches = App::new("MPDBliss")
-        .version("1.0")
+    env_logger::init_from_env(
+        env_logger::Env::default()
+            .filter_or("RUST_LOG", "info")
+    );
+
+    let matches = App::new("blissify")
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Polochon_street")
         .about("Analyze a MPD music database, and make playlists.")
         .arg(
