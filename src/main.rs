@@ -7,7 +7,7 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::Library;
+use bliss_audio::{Analysis, Library, NUMBER_FEATURES};
 use bliss_audio::{BlissError, Song};
 use clap::{App, Arg, ArgGroup};
 #[cfg(not(test))]
@@ -21,6 +21,7 @@ use mpd::song::Song as MPDSong;
 use mpd::Client;
 use rusqlite::{params, Connection, Error as RusqliteError, Row};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 #[cfg(not(test))]
 use std::env;
 use std::fs::create_dir_all;
@@ -101,7 +102,15 @@ impl MPDLibrary {
         if analysis.is_empty() {
             bail!("Song '{}' has not been analyzed.", song.path);
         }
-        song.analysis = analysis;
+        let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
+            BlissError::ProviderError(
+                "Too many or too little features were provided at the end of    
+                the analysis. You might be using an older version of blissify
+                with a newer bliss."
+                    .to_string(),
+            )
+        })?;
+        song.analysis = Analysis::new(array);
         Ok(Some(song))
     }
 
@@ -234,15 +243,27 @@ impl Library for MPDLibrary {
             let song_entry = songs_hashmap.entry(result.0).or_insert_with(Vec::new);
             song_entry.push(result.1);
         }
-        let songs: Vec<Song> = songs_hashmap
+        songs_hashmap
             .into_iter()
-            .map(|(path, analysis)| Song {
-                path,
-                analysis,
-                ..Default::default()
+            .map(|(path, analysis)| {
+                let array: [f32; NUMBER_FEATURES] = analysis
+                    .try_into()
+                    .map_err(|_| {
+                        BlissError::ProviderError(
+                            "Too many or too little features were provided at the end of    
+                        the analysis. You might be using an older version of blissify
+                        with a newer bliss."
+                                .to_string(),
+                        )
+                    })?;
+
+                Ok(Song {
+                    path,
+                    analysis: Analysis::new(array),
+                    ..Default::default()
+                })
             })
-            .collect();
-        Ok(songs)
+            .collect::<Result<Vec<Song>, BlissError>>()
     }
 
     fn get_songs_paths(&self) -> Result<Vec<String>, BlissError> {
@@ -290,7 +311,7 @@ impl Library for MPDLibrary {
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         let last_song_id = sqlite_conn.last_insert_rowid();
-        for (index, feature) in song.analysis.iter().enumerate() {
+        for (index, feature) in song.analysis.to_vec().iter().enumerate() {
             sqlite_conn
                 .execute(
                     "
@@ -321,10 +342,7 @@ impl Library for MPDLibrary {
 }
 
 fn main() -> Result<()> {
-    env_logger::init_from_env(
-        env_logger::Env::default()
-            .filter_or("RUST_LOG", "info")
-    );
+    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"));
 
     let matches = App::new("blissify")
         .version(env!("CARGO_PKG_VERSION"))
@@ -450,69 +468,6 @@ mod test {
     }
 
     #[test]
-    //    fn test_full_rescan() {
-    //        let mut library = MPDLibrary::new(String::from("./data/")).unwrap();
-    //        let sqlite_conn = library.sqlite_conn.lock().unwrap();
-    //        sqlite_conn
-    //            .execute(
-    //                "
-    //            insert into song (id, path, analyzed) values
-    //                (1,'./data/s16_mono_22_5kHz.flac', true)
-    //            ",
-    //                [],
-    //            )
-    //            .unwrap();
-    //
-    //        sqlite_conn
-    //            .execute(
-    //                "
-    //            insert into feature (song_id, feature, feature_index) values
-    //                (1, 0., 1),
-    //                (1, 0., 2),
-    //                (1, 0., 3)
-    //            ",
-    //                [],
-    //            )
-    //            .unwrap();
-    //        drop(sqlite_conn);
-    //
-    //        library.full_rescan().unwrap();
-    //
-    //        let sqlite_conn = library.sqlite_conn.lock().unwrap();
-    //        let mut stmt = sqlite_conn
-    //            .prepare("select path, analyzed from song order by path")
-    //            .unwrap();
-    //        let expected_songs = stmt
-    //            .query_map([], |row| Ok((row.get(0).unwrap(), row.get(1).unwrap())))
-    //            .unwrap()
-    //            .map(|x| {
-    //                let x = x.unwrap();
-    //                (x.0, x.1)
-    //            })
-    //            .collect::<Vec<(String, bool)>>();
-    //
-    //        assert_eq!(
-    //            expected_songs,
-    //            vec![
-    //                (String::from("foo"), false),
-    //                (String::from("s16_mono_22_5kHz.flac"), true),
-    //                (String::from("s16_stereo_22_5kHz.flac"), true),
-    //            ],
-    //        );
-    //
-    //        let mut stmt = sqlite_conn
-    //            .prepare("select count(*) from feature group by song_id")
-    //            .unwrap();
-    //        let expected_feature_count = stmt
-    //            .query_map([], |row| row.get(0))
-    //            .unwrap()
-    //            .map(|x| x.unwrap())
-    //            .collect::<Vec<u32>>();
-    //        for feature_count in expected_feature_count {
-    //            assert!(feature_count > 1);
-    //        }
-    //    }
-    #[test]
     fn test_playlist_no_song() {
         let library = MPDLibrary::new(String::from("")).unwrap();
 
@@ -619,12 +574,63 @@ mod test {
                 (1, 0., 1),
                 (1, 0., 2),
                 (1, 0., 3),
+                (1, 0., 4),
+                (1, 0., 5),
+                (1, 0., 6),
+                (1, 0., 7),
+                (1, 0., 8),
+                (1, 0., 9),
+                (1, 0., 10),
+                (1, 0., 11),
+                (1, 0., 12),
+                (1, 0., 13),
+                (1, 0., 14),
+                (1, 0., 15),
+                (1, 0., 16),
+                (1, 0., 17),
+                (1, 0., 18),
+                (1, 0., 19),
+                (1, 0., 20),
                 (2, 0.1, 1),
                 (2, 0.1, 2),
                 (2, 0.1, 3),
-                (3, 10., 1),
-                (3, 10., 2),
-                (3, 10., 3)
+                (2, 0.1, 4),
+                (2, 0.1, 5),
+                (2, 0.1, 6),
+                (2, 0.1, 7),
+                (2, 0.1, 8),
+                (2, 0.1, 9),
+                (2, 0.1, 10),
+                (2, 0.1, 11),
+                (2, 0.1, 12),
+                (2, 0.1, 13),
+                (2, 0.1, 14),
+                (2, 0.1, 15),
+                (2, 0.1, 16),
+                (2, 0.1, 17),
+                (2, 0.1, 18),
+                (2, 0.1, 19),
+                (2, 0.1, 20),
+                (3, 10, 1),
+                (3, 10, 2),
+                (3, 10, 3),
+                (3, 10, 4),
+                (3, 10, 5),
+                (3, 10, 6),
+                (3, 10, 7),
+                (3, 10, 8),
+                (3, 10, 9),
+                (3, 10, 10),
+                (3, 10, 11),
+                (3, 10, 12),
+                (3, 10, 13),
+                (3, 10, 14),
+                (3, 10, 15),
+                (3, 10, 16),
+                (3, 10, 17),
+                (3, 10, 18),
+                (3, 10, 19),
+                (3, 10, 20);
             ",
                 [],
             )
@@ -672,7 +678,24 @@ mod test {
             insert into feature (song_id, feature, feature_index) values
                 (1, 0., 1),
                 (1, 0., 2),
-                (1, 0., 3)
+                (1, 0., 3),
+                (1, 0., 4),
+                (1, 0., 5),
+                (1, 0., 6),
+                (1, 0., 7),
+                (1, 0., 8),
+                (1, 0., 9),
+                (1, 0., 10),
+                (1, 0., 11),
+                (1, 0., 12),
+                (1, 0., 13),
+                (1, 0., 14),
+                (1, 0., 15),
+                (1, 0., 16),
+                (1, 0., 17),
+                (1, 0., 18),
+                (1, 0., 19),
+                (1, 0., 20);
             ",
                 [],
             )
