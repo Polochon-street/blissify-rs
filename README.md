@@ -23,6 +23,10 @@ Usage
 
 Use `cargo install blissify` to install it.
 
+All the commands below read the `MPD_HOST` and `MPD_PORT` environment
+variables and try to reach MPD using that. You might want to change
+it if MPD is listening to somewhere else than `127.0.0.1:6600` (the default).
+
 Analyze a library
 -----------------
 
