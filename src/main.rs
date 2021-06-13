@@ -58,11 +58,18 @@ impl MPDLibrary {
         let mpd_host = match env::var("MPD_HOST") {
             Ok(h) => h,
             Err(_) => {
-                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1:6600.");
-                String::from("127.0.0.1:6600")
+                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1.");
+                String::from("127.0.0.1")
             }
         };
-        Ok(Client::connect(&mpd_host)?)
+        let mpd_port = match env::var("MPD_PORT") {
+            Ok(p) => p.parse::<u16>().with_context(|| "while trying to coerce MPD_PORT to an integer")?,
+            Err(_) => {
+                warn!("Could not find any MPD_PORT environment variable set. Defaulting to 6600.");
+                6600
+            }
+        };
+        Ok(Client::connect((mpd_host.as_str(), mpd_port))?)
     }
 
     #[cfg(not(test))]
