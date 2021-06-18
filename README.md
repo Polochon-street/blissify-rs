@@ -18,6 +18,9 @@ After that, it is ready to make playlists: play a song to start from, run
 `blissify --playlist 30`, and voilà! You have a playlist of 30 songs that
 sound like your first track.
 
+Note: you *need* to have MPD installed to use blissify. Otherwise, you need
+to implement bliss-rs support for the player you use.
+
 Usage
 =====
 
