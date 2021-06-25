@@ -96,10 +96,7 @@ impl MPDLibrary {
         let results = stmt.query_map(params![&path.to_str().unwrap()], MPDLibrary::row_closure)?;
 
         let mut song = Song {
-            path: path
-                .to_str()
-                .with_context(|| "While getting current song path")?
-                .to_owned(),
+            path: path.to_owned(),
             ..Default::default()
         };
         let mut analysis = vec![];
@@ -107,7 +104,7 @@ impl MPDLibrary {
             analysis.push(result?.1);
         }
         if analysis.is_empty() {
-            bail!("Song '{}' has not been analyzed.", song.path);
+            bail!("Song '{}' has not been analyzed.", song.path.display());
         }
         let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
             BlissError::ProviderError(
@@ -218,7 +215,7 @@ impl MPDLibrary {
 
         for song in &playlist[1..] {
             let mpd_song = MPDSong {
-                file: song.path.to_string(),
+                file: song.path.to_string_lossy().to_string(),
                 ..Default::default()
             };
             mpd_conn.push(mpd_song)?;
@@ -265,7 +262,7 @@ impl Library for MPDLibrary {
                     })?;
 
                 Ok(Song {
-                    path,
+                    path: PathBuf::from(&path),
                     analysis: Analysis::new(array),
                     ..Default::default()
                 })
