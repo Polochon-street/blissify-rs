@@ -12,7 +12,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bliss-audio = "0.2.4"
+bliss-audio = {git = "https://github.com/Polochon-street/bliss-rs", branch = "tentative-thread-safing"}
 mpd = "0.0.12"
 rusqlite = "0.25.0"
 dirs = "3.0.1"
