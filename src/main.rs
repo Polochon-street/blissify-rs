@@ -63,7 +63,9 @@ impl MPDLibrary {
             }
         };
         let mpd_port = match env::var("MPD_PORT") {
-            Ok(p) => p.parse::<u16>().with_context(|| "while trying to coerce MPD_PORT to an integer")?,
+            Ok(p) => p
+                .parse::<u16>()
+                .with_context(|| "while trying to coerce MPD_PORT to an integer")?,
             Err(_) => {
                 warn!("Could not find any MPD_PORT environment variable set. Defaulting to 6600.");
                 6600
@@ -96,10 +98,7 @@ impl MPDLibrary {
         let results = stmt.query_map(params![&path.to_str().unwrap()], MPDLibrary::row_closure)?;
 
         let mut song = Song {
-            path: path
-                .to_str()
-                .with_context(|| "While getting current song path")?
-                .to_owned(),
+            path: path.to_owned(),
             ..Default::default()
         };
         let mut analysis = vec![];
@@ -107,7 +106,7 @@ impl MPDLibrary {
             analysis.push(result?.1);
         }
         if analysis.is_empty() {
-            bail!("Song '{}' has not been analyzed.", song.path);
+            bail!("Song '{}' has not been analyzed.", song.path.display());
         }
         let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
             BlissError::ProviderError(
@@ -218,7 +217,7 @@ impl MPDLibrary {
 
         for song in &playlist[1..] {
             let mpd_song = MPDSong {
-                file: song.path.to_string(),
+                file: song.path.to_string_lossy().to_string(),
                 ..Default::default()
             };
             mpd_conn.push(mpd_song)?;
@@ -253,19 +252,17 @@ impl Library for MPDLibrary {
         songs_hashmap
             .into_iter()
             .map(|(path, analysis)| {
-                let array: [f32; NUMBER_FEATURES] = analysis
-                    .try_into()
-                    .map_err(|_| {
-                        BlissError::ProviderError(
-                            "Too many or too little features were provided at the end of    
+                let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
+                    BlissError::ProviderError(
+                        "Too many or too little features were provided at the end of    
                         the analysis. You might be using an older version of blissify
                         with a newer bliss."
-                                .to_string(),
-                        )
-                    })?;
+                            .to_string(),
+                    )
+                })?;
 
                 Ok(Song {
-                    path,
+                    path: PathBuf::from(&path),
                     analysis: Analysis::new(array),
                     ..Default::default()
                 })
@@ -305,6 +302,14 @@ impl Library for MPDLibrary {
             values (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7
             )
+            on conflict(path)
+            do update set
+                artist=excluded.artist,
+                title=excluded.title,
+                album=excluded.album,
+                track_number=excluded.track_number,
+                genre=excluded.genre,
+                analyzed=excluded.analyzed
             ",
                 params![
                     path.to_str(),
@@ -317,7 +322,20 @@ impl Library for MPDLibrary {
                 ],
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        let last_song_id = sqlite_conn.last_insert_rowid();
+        let last_song_id: i64 = sqlite_conn
+            .query_row(
+                "select id from song where path = ?1",
+                params![path.to_str()],
+                |row| row.get(0),
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        sqlite_conn
+            .execute(
+                "delete from feature where song_id = ?1",
+                params![last_song_id],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+
         for (index, feature) in song.analysis.to_vec().iter().enumerate() {
             sqlite_conn
                 .execute(
@@ -745,4 +763,89 @@ mod test {
             assert!(feature_count > 1);
         }
     }
+
+    #[test]
+    fn test_update_screwed_db() {
+        let mut library = MPDLibrary::new(String::from("./data/")).unwrap();
+
+        let sqlite_conn = library.sqlite_conn.lock().unwrap();
+        // We shouldn't have a song with analyzed = false, but features there,
+        // but apparently it can happen, so testing that we recover properly.
+        sqlite_conn
+            .execute(
+                "
+            insert into song (id, path, analyzed) values
+                (1, 's16_mono_22_5kHz.flac', false)
+            ",
+                [],
+            )
+            .unwrap();
+
+        sqlite_conn
+            .execute(
+                "
+            insert into feature (song_id, feature, feature_index) values
+                (1, 0., 1),
+                (1, 0., 2),
+                (1, 0., 3),
+                (1, 0., 4),
+                (1, 0., 5),
+                (1, 0., 6),
+                (1, 0., 7),
+                (1, 0., 8),
+                (1, 0., 9),
+                (1, 0., 10),
+                (1, 0., 11),
+                (1, 0., 12),
+                (1, 0., 13),
+                (1, 0., 14),
+                (1, 0., 15),
+                (1, 0., 16),
+                (1, 0., 17),
+                (1, 0., 18),
+                (1, 0., 19),
+                (1, 0., 20);
+            ",
+                [],
+            )
+            .unwrap();
+        drop(sqlite_conn);
+
+        library.update().unwrap();
+
+        let sqlite_conn = library.sqlite_conn.lock().unwrap();
+        let mut stmt = sqlite_conn
+            .prepare("select count(song_id), path, analyzed from song left outer join feature on feature.song_id = song.id group by song.id order by path")
+            .unwrap();
+        let expected_songs = stmt
+            .query_map([], |row| Ok((row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap())))
+            .unwrap()
+            .map(|x| {
+                let x = x.unwrap();
+                (x.0, x.1, x.2)
+            })
+            .collect::<Vec<(usize, String, bool)>>();
+
+        assert_eq!(
+            expected_songs,
+            vec![
+                (0, String::from("foo"), false),
+                (NUMBER_FEATURES, String::from("s16_mono_22_5kHz.flac"), true),
+                (NUMBER_FEATURES, String::from("s16_stereo_22_5kHz.flac"), true),
+            ],
+        );
+
+        let mut stmt = sqlite_conn
+            .prepare("select count(*) from feature group by song_id")
+            .unwrap();
+        let expected_feature_count = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect::<Vec<u32>>();
+        for feature_count in expected_feature_count {
+            assert!(feature_count > 1);
+        }
+    }
+
 }
