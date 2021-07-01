@@ -200,6 +200,7 @@ impl MPDLibrary {
         distance: impl DistanceMetric,
     ) -> Result<()> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
+        mpd_conn.random(false)?;
         let mpd_song = match mpd_conn.currentsong()? {
             Some(s) => s,
             None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
@@ -493,6 +494,11 @@ mod test {
 
         pub fn push(&mut self, song: MPDSong) -> Result<()> {
             self.mpd_queue.push(song);
+            Ok(())
+        }
+
+        pub fn random(&mut self, state: bool) -> Result<()> {
+            assert!(!state);
             Ok(())
         }
     }
