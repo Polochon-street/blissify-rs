@@ -7,9 +7,9 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::{Analysis, Library, NUMBER_FEATURES};
-use bliss_audio::{BlissError, Song};
-use clap::{App, Arg, ArgGroup};
+use bliss_audio::distance::{cosine_distance, euclidean_distance, DistanceMetric};
+use bliss_audio::{Analysis, BlissError, BlissResult, Library, Song, NUMBER_FEATURES};
+use clap::{App, Arg, SubCommand};
 #[cfg(not(test))]
 use dirs::data_local_dir;
 use log::info;
@@ -42,9 +42,6 @@ struct MPDLibrary {
 pub struct MockMPDClient {
     mpd_queue: Vec<MPDSong>,
 }
-
-#[derive(Debug)]
-struct MPDBlissError;
 
 impl MPDLibrary {
     fn row_closure(row: &Row) -> Result<(String, f32), RusqliteError> {
@@ -110,7 +107,7 @@ impl MPDLibrary {
         }
         let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
             BlissError::ProviderError(
-                "Too many or too little features were provided at the end of    
+                "Too many or too little features were provided at the end of
                 the analysis. You might be using an older version of blissify
                 with a newer bliss."
                     .to_string(),
@@ -197,7 +194,11 @@ impl MPDLibrary {
         Ok(())
     }
 
-    fn queue_from_current_song(&self, number_songs: usize) -> Result<()> {
+    fn queue_from_current_song_custom_distance(
+        &self,
+        number_songs: usize,
+        distance: impl DistanceMetric,
+    ) -> Result<()> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         let mpd_song = match mpd_conn.currentsong()? {
             Some(s) => s,
@@ -207,7 +208,8 @@ impl MPDLibrary {
         let current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
             "No song is currently playing. Add a song to start the playlist from, and try again."
         })?;
-        let playlist = self.playlist_from_song(current_song, number_songs)?;
+        let playlist =
+            self.playlist_from_song_custom_distance(current_song, number_songs, distance)?;
 
         let current_pos = mpd_song.place.unwrap().pos;
         mpd_conn.delete(0..current_pos)?;
@@ -227,7 +229,7 @@ impl MPDLibrary {
 }
 
 impl Library for MPDLibrary {
-    fn get_stored_songs(&self) -> Result<Vec<Song>, BlissError> {
+    fn get_stored_songs(&self) -> BlissResult<Vec<Song>> {
         let sqlite_conn = self.sqlite_conn.lock().unwrap();
         let mut stmt = sqlite_conn
             .prepare(
@@ -267,10 +269,10 @@ impl Library for MPDLibrary {
                     ..Default::default()
                 })
             })
-            .collect::<Result<Vec<Song>, BlissError>>()
+            .collect::<BlissResult<Vec<Song>>>()
     }
 
-    fn get_songs_paths(&self) -> Result<Vec<String>, BlissError> {
+    fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         Ok(mpd_conn
             .list(&Term::File, &Query::default())
@@ -350,7 +352,7 @@ impl Library for MPDLibrary {
         Ok(())
     }
 
-    fn store_error_song(&mut self, song_path: String, _: BlissError) -> Result<(), BlissError> {
+    fn store_error_song(&mut self, song_path: String, _: BlissError) -> BlissResult<()> {
         let path = song_path.strip_prefix(&self.mpd_base_path.to_str().unwrap());
         self.sqlite_conn
             .lock()
@@ -373,56 +375,69 @@ fn main() -> Result<()> {
         .version(env!("CARGO_PKG_VERSION"))
         .author("Polochon_street")
         .about("Analyze a MPD music database, and make playlists.")
-        .arg(
-            Arg::with_name("rescan")
-                .short("r")
-                .long("rescan")
-                .value_name("MPD base path")
-                .help("(Re)scan completely an MPD library")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("update")
-                .short("u")
-                .long("update")
-                .value_name("MPD base path")
-                .help("Scan new songs in the MPD library since last scan")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("playlist")
-                .short("p")
-                .long("playlist")
-                .value_name("playlist length")
-                .help("Build a playlist from the currently played song")
-                .takes_value(true),
-        )
-        .group(
-            ArgGroup::with_name("options")
+        .subcommand(
+            SubCommand::with_name("rescan")
+            .about("(Re)scan completely an MPD library")
+            .arg(Arg::with_name("MPD_BASE_PATH")
+                .help("MPD base path. The value of `music_directory` in your mpd.conf.")
                 .required(true)
-                .multiple(false)
-                .args(&["playlist", "rescan", "update"]),
+            )
+        )
+        .subcommand(
+            SubCommand::with_name("update")
+            .about("Scan new songs that were added to the MPD library since last scan.")
+            .arg(Arg::with_name("MPD_BASE_PATH")
+                .help("MPD base path. The value of `music_directory` in your mpd.conf.")
+                .required(true)
+            )
+        )
+        .subcommand(
+            SubCommand::with_name("playlist")
+            .about("Build a playlist from the currently played song")
+            .arg(Arg::with_name("PLAYLIST_LENGTH")
+                .help("The desired playlist length, including the first song.")
+                .required(true)
+            )
+            .arg(Arg::with_name("distance")
+                .long("distance")
+                .value_name("distance metric")
+                .help(
+                    "Choose the distance metric used to make the playlist. Default is 'euclidean',\
+                    other option is 'cosine'"
+                )
+                .default_value("euclidean")
+            )
         )
         .get_matches();
 
-    if matches.is_present("rescan") {
-        let base_path = matches.value_of("rescan").unwrap();
+    if let Some(sub_m) = matches.subcommand_matches("rescan") {
+        let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
         let mut library = MPDLibrary::new(base_path.to_string())?;
         library.full_rescan()?;
-    } else if matches.is_present("update") {
-        let base_path = matches.value_of("update").unwrap();
+    } else if let Some(sub_m) = matches.subcommand_matches("update") {
+        let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
         let mut library = MPDLibrary::new(base_path.to_string())?;
         library.update()?;
-    } else if matches.is_present("playlist") {
-        let number_songs = match matches.value_of("playlist").unwrap().parse::<usize>() {
+    } else if let Some(sub_m) = matches.subcommand_matches("playlist") {
+        let number_songs = match sub_m.value_of("PLAYLIST_LENGTH").unwrap().parse::<usize>() {
             Err(_) => {
                 bail!("Playlist number must be a valid number.");
             }
             Ok(n) => n,
         };
 
+        let distance_metric = if let Some(m) = sub_m.value_of("distance") {
+            match m {
+                "euclidean" => euclidean_distance,
+                "cosine" => cosine_distance,
+                _ => bail!("Please choose a distance name, between 'euclidean' and 'cosine'."),
+            }
+        } else {
+            euclidean_distance
+        };
+
         let library = MPDLibrary::new(String::from(""))?;
-        library.queue_from_current_song(number_songs)?;
+        library.queue_from_current_song_custom_distance(number_songs, distance_metric)?;
     }
 
     Ok(())
@@ -512,7 +527,7 @@ mod test {
 
         drop(sqlite_conn);
         assert_eq!(
-            library.queue_from_current_song(20).unwrap_err().to_string(),
+            library.queue_from_current_song_custom_distance(20, euclidean_distance).unwrap_err().to_string(),
             String::from("No song is currently playing. Add a song to start the playlist from, and try again."),
         );
     }
@@ -547,7 +562,10 @@ mod test {
 
         drop(sqlite_conn);
         assert_eq!(
-            library.queue_from_current_song(20).unwrap_err().to_string(),
+            library
+                .queue_from_current_song_custom_distance(20, euclidean_distance)
+                .unwrap_err()
+                .to_string(),
             String::from("Song 'not-existing.flac' has not been analyzed."),
         );
     }
@@ -661,7 +679,9 @@ mod test {
             )
             .unwrap();
         drop(sqlite_conn);
-        library.queue_from_current_song(20).unwrap();
+        library
+            .queue_from_current_song_custom_distance(20, euclidean_distance)
+            .unwrap();
 
         let playlist = library
             .mpd_conn
@@ -818,7 +838,13 @@ mod test {
             .prepare("select count(song_id), path, analyzed from song left outer join feature on feature.song_id = song.id group by song.id order by path")
             .unwrap();
         let expected_songs = stmt
-            .query_map([], |row| Ok((row.get(0).unwrap(), row.get(1).unwrap(), row.get(2).unwrap())))
+            .query_map([], |row| {
+                Ok((
+                    row.get(0).unwrap(),
+                    row.get(1).unwrap(),
+                    row.get(2).unwrap(),
+                ))
+            })
             .unwrap()
             .map(|x| {
                 let x = x.unwrap();
@@ -831,7 +857,11 @@ mod test {
             vec![
                 (0, String::from("foo"), false),
                 (NUMBER_FEATURES, String::from("s16_mono_22_5kHz.flac"), true),
-                (NUMBER_FEATURES, String::from("s16_stereo_22_5kHz.flac"), true),
+                (
+                    NUMBER_FEATURES,
+                    String::from("s16_stereo_22_5kHz.flac"),
+                    true
+                ),
             ],
         );
 
@@ -847,5 +877,4 @@ mod test {
             assert!(feature_count > 1);
         }
     }
-
 }

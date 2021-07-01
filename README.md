@@ -15,11 +15,11 @@ a series of features from your songs, extracting the tempo, timbre,
 loudness, etc.
 
 After that, it is ready to make playlists: play a song to start from, run
-`blissify --playlist 30`, and voilà! You have a playlist of 30 songs that
+`blissify playlist 30`, and voilà! You have a playlist of 30 songs that
 sound like your first track.
 
-Note: you *need* to have MPD installed to use blissify. Otherwise, you need
-to implement bliss-rs support for the player you use.
+Note: you *need* to have MPD installed to use blissify. Otherwise, you
+probably want to implement bliss-rs support for the audio player you use.
 
 Usage
 =====
@@ -35,23 +35,46 @@ Analyze a library
 
 To analyze your MPD library, use
 ```
-$ blissify --update /path/to/mpd/root
+$ blissify update /path/to/mpd/root
 ```
-(or `blissify --rescan /path/to/mpd/root`).
+
+If something goes wrong during the analysis, and the database enters an
+unstable state, you can use
+```
+$ blissify rescan /path/to/mpd/root
+```
+to remove the existing database and rescan all files.
 
 Make a playlist
 ---------------
 
+Simple version
+~~~~~~~~~~~~~~
+
 ```
-$ blissify --playlist 100
+$ blissify playlist 100
 ```
 
 This will add 100 songs similar to the song that is currently
 playing on MPD, starting with the closest possible.
+
+Changing the distance metric
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To make a playlist with a distance metric different than the default one
+(euclidean distance), which will yield different playlists, run:
+
+```
+$ blissify playlist 30 --distance <distance_name>
+```
+
+`distance_name` is currently `euclidean` and `cosine`. Don't hesitate to
+experiment with this parameter if the generated playlists are not to your
+linking!
 
 Details
 =======
 
 If you are interested about what is happening under the hood, or want to make
 a similar plug-in for other audio players, see
-[bliss' doc](https://docs.rs/crate/bliss-audio/0.1.3).
+[bliss' doc](https://docs.rs/crate/bliss-audio/).
