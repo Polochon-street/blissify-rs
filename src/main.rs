@@ -8,13 +8,17 @@
 //! --playlist.
 use anyhow::{bail, Context, Result};
 use bliss_audio::distance::{cosine_distance, euclidean_distance, DistanceMetric};
-use bliss_audio::{Analysis, BlissError, BlissResult, Library, Song, NUMBER_FEATURES};
+use bliss_audio::{
+    library::analyze_paths_streaming, Analysis, BlissError, BlissResult, Library, Song,
+    NUMBER_FEATURES,
+};
 use clap::{App, Arg, SubCommand};
 #[cfg(not(test))]
 use dirs::data_local_dir;
-use log::info;
+use indicatif::{ProgressBar, ProgressStyle};
 #[cfg(not(test))]
 use log::warn;
+use log::{error, info};
 use mpd::search::{Query, Term};
 use mpd::song::Song as MPDSong;
 #[cfg(not(test))]
@@ -160,6 +164,46 @@ impl MPDLibrary {
         })
     }
 
+    fn analyze_paths_showprogress(&mut self, paths: Vec<String>) -> Result<()> {
+        let number_songs = paths.len();
+        if number_songs == 0 {
+            println!("No (new) songs found.");
+            return Ok(());
+        }
+        println!(
+            "Analyzing {} songs, this might take some time…",
+            number_songs
+        );
+        let pb = ProgressBar::new(number_songs.try_into().unwrap());
+        let style = ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40} {pos:>7}/{len:7} {wide_msg}")
+            .progress_chars("##-");
+        pb.set_style(style);
+
+        let results = analyze_paths_streaming(paths)?;
+        let mut success_count = 0;
+        let mut failure_count = 0;
+        for (path, result) in results {
+            pb.set_message(format!("Analyzing {}", path));
+            pb.inc(1);
+            match result {
+                Ok(song) => {
+                    self.store_song(&song)?;
+                    success_count += 1;
+                }
+                Err(e) => {
+                    self.store_error_song(path, e)?;
+                    failure_count += 1;
+                }
+            };
+        }
+        pb.finish_with_message(format!(
+            "Analyzed {} song(s) successfully. {} Failure(s).",
+            success_count, failure_count
+        ));
+        Ok(())
+    }
+
     fn update(&mut self) -> Result<()> {
         let stored_songs = self
             .get_stored_songs()?
@@ -181,7 +225,7 @@ impl MPDLibrary {
             .cloned()
             .collect::<Vec<String>>();
         info!("Found {} new songs to analyze.", to_analyze.len());
-        self.analyze_paths(to_analyze)?;
+        self.analyze_paths_showprogress(to_analyze)?;
         Ok(())
     }
 
@@ -190,7 +234,8 @@ impl MPDLibrary {
         sqlite_conn.execute("delete from feature", [])?;
         sqlite_conn.execute("delete from song", [])?;
         drop(sqlite_conn);
-        self.analyze_library()?;
+        let paths = self.get_songs_paths()?;
+        self.analyze_paths_showprogress(paths)?;
         Ok(())
     }
 
@@ -257,8 +302,8 @@ impl Library for MPDLibrary {
             .map(|(path, analysis)| {
                 let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
                     BlissError::ProviderError(
-                        "Too many or too little features were provided at the end of    
-                        the analysis. You might be using an older version of blissify
+                        "Too many or too little features were provided at the end of \
+                        the analysis. You might be using an older version of blissify \
                         with a newer bliss."
                             .to_string(),
                     )
@@ -353,7 +398,7 @@ impl Library for MPDLibrary {
         Ok(())
     }
 
-    fn store_error_song(&mut self, song_path: String, _: BlissError) -> BlissResult<()> {
+    fn store_error_song(&mut self, song_path: String, e: BlissError) -> BlissResult<()> {
         let path = song_path.strip_prefix(&self.mpd_base_path.to_str().unwrap());
         self.sqlite_conn
             .lock()
@@ -365,17 +410,21 @@ impl Library for MPDLibrary {
                 [path],
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        error!(
+            "Analysis of song '{}' failed: {} The error has been stored.",
+            song_path, e
+        );
         Ok(())
     }
 }
 
 fn main() -> Result<()> {
-    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"));
+    env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "warn"));
 
     let matches = App::new("blissify")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Polochon_street")
-        .about("Analyze a MPD music database, and make playlists.")
+        .about("Analyze and make smart playlists from an MPD music database.")
         .subcommand(
             SubCommand::with_name("rescan")
             .about("(Re)scan completely an MPD library")
