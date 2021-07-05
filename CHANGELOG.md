@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.2.1
+* Add a proper progressbar for the analysis.
+
 ## blissify 0.2.0
 * Make blissify subcommands (`blissify update`, etc) instead of flags.
 * Change `blissify playlist` to be able to use various distance functions.
