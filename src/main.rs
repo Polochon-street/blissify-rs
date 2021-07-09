@@ -336,7 +336,7 @@ impl Library for MPDLibrary {
     }
 
     fn store_song(&mut self, song: &Song) -> Result<(), BlissError> {
-        let sqlite_conn = self.sqlite_conn.lock().unwrap();
+        let mut sqlite_conn = self.sqlite_conn.lock().unwrap();
         let path = Path::new(&song.path)
             .strip_prefix(&self.mpd_base_path)
             .unwrap();
@@ -384,8 +384,9 @@ impl Library for MPDLibrary {
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
 
+        let tx = sqlite_conn.transaction().map_err(|e| BlissError::ProviderError(e.to_string()))?;
         for (index, feature) in song.analysis.to_vec().iter().enumerate() {
-            sqlite_conn
+                tx 
                 .execute(
                     "
                 insert into feature (song_id, feature, feature_index)
@@ -395,6 +396,7 @@ impl Library for MPDLibrary {
                 )
                 .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         }
+        tx.commit().map_err(|e| BlissError::ProviderError(e.to_string()))?;
         Ok(())
     }
 
