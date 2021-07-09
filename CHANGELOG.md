@@ -3,6 +3,8 @@
 ## blissify 0.2.2
 * Add a `list-db` subcommand to list what was analyzed.
 * Make blissify toggle random mode off when making playlists.
+* Make inserts atomic so ctrl+c'd the analysis will not make the next update
+  fail.
 
 ## blissify 0.2.1
 * Add a proper progressbar for the analysis.
