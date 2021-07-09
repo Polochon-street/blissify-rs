@@ -45,6 +45,12 @@ $ blissify rescan /path/to/mpd/root
 ```
 to remove the existing database and rescan all files.
 
+If you want to see if the analysis has been successful, or simply want to see
+the current files in, you can use
+```
+$ blissify list-db
+```
+
 Make a playlist
 ---------------
 

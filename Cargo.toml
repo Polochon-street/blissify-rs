@@ -12,7 +12,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bliss-audio = "0.3.3"
+bliss-audio = "0.3.4"
 mpd = "0.0.12"
 rusqlite = "0.25.0"
 dirs = "3.0.1"
@@ -20,5 +20,5 @@ tempdir = "0.3.7"
 clap = "2.33.3"
 anyhow = "1.0.40"
 log = "0.4.14"
-env_logger = "0.8.3"
+env_logger = "0.8.4"
 indicatif = "0.16.2"

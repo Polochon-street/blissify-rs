@@ -185,7 +185,6 @@ impl MPDLibrary {
         let mut failure_count = 0;
         for (path, result) in results {
             pb.set_message(format!("Analyzing {}", path));
-            pb.inc(1);
             match result {
                 Ok(song) => {
                     self.store_song(&song)?;
@@ -196,6 +195,7 @@ impl MPDLibrary {
                     failure_count += 1;
                 }
             };
+            pb.inc(1);
         }
         pb.finish_with_message(format!(
             "Analyzed {} song(s) successfully. {} Failure(s).",
@@ -426,6 +426,14 @@ fn main() -> Result<()> {
         .author("Polochon_street")
         .about("Analyze and make smart playlists from an MPD music database.")
         .subcommand(
+            SubCommand::with_name("list-db")
+            .about("Print songs that have been analyzed and are in blissify's database.")
+            .arg(Arg::with_name("detailed").long("detailed")
+                .takes_value(false)
+                .help("Display analyzed song paths, as well as the corresponding analysis.")
+            )
+        )
+        .subcommand(
             SubCommand::with_name("rescan")
             .about("(Re)scan completely an MPD library")
             .arg(Arg::with_name("MPD_BASE_PATH")
@@ -460,7 +468,22 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
-    if let Some(sub_m) = matches.subcommand_matches("rescan") {
+    if let Some(sub_m) = matches.subcommand_matches("list-db") {
+        let library = MPDLibrary::new(String::from(""))?;
+        let mut songs = library.get_stored_songs()?;
+
+        songs.sort_by_key(|x| match x.path.to_str().as_ref() {
+            Some(a) => a.to_string(),
+            None => String::from(""),
+        });
+        for song in songs {
+            if sub_m.is_present("detailed") {
+                println!("{}: {:?}", song.path.display(), song.analysis);
+            } else {
+                println!("{}", song.path.display());
+            }
+        }
+    } else if let Some(sub_m) = matches.subcommand_matches("rescan") {
         let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
         let mut library = MPDLibrary::new(base_path.to_string())?;
         library.full_rescan()?;
