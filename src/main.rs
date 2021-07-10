@@ -23,7 +23,7 @@ use mpd::search::{Query, Term};
 use mpd::song::Song as MPDSong;
 #[cfg(not(test))]
 use mpd::Client;
-use rusqlite::{params, Connection, Error as RusqliteError, Row};
+use rusqlite::{params, Connection, Error as RusqliteError};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 #[cfg(not(test))]
@@ -32,28 +32,34 @@ use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// The main struct that implements the Library trait, and some other
+/// helper functions to make everything work properly.
 struct MPDLibrary {
+    /// The MPD base path, as specified by the user and written in the MPD
+    /// config file.
     pub mpd_base_path: PathBuf,
+    /// A connection to blissify's SQLite database, used for storing
+    /// and retrieving analyzed songs.
     pub sqlite_conn: Arc<Mutex<Connection>>,
+    /// A connection to the MPD server, used for retrieving song's paths,
+    /// currently played songs, and queue tracks.
     #[cfg(not(test))]
     pub mpd_conn: Arc<Mutex<Client>>,
+    /// A mock MPDClient, used for testing purposes only.
     #[cfg(test)]
     pub mpd_conn: Arc<Mutex<MockMPDClient>>,
 }
 
 #[cfg(test)]
 #[derive(Default)]
+/// Convenience Mock for testing.
 pub struct MockMPDClient {
     mpd_queue: Vec<MPDSong>,
 }
 
 impl MPDLibrary {
-    fn row_closure(row: &Row) -> Result<(String, f32), RusqliteError> {
-        let path = row.get(0)?;
-        let feature = row.get(1)?;
-        Ok((path, feature))
-    }
-
+    /// Get a connection to the MPD database given some environment
+    /// variables.
     #[cfg(not(test))]
     fn get_mpd_conn() -> Result<Client> {
         let mpd_host = match env::var("MPD_HOST") {
@@ -83,6 +89,16 @@ impl MPDLibrary {
         }
     }
 
+    /// Convert a `MPDSong` to a previously analyzed `BlissSong`, if it exists
+    /// in blissify's database.
+    ///
+    /// This is done by querying the database for the song's features, and
+    /// returns Ok(None) if no such song has been analyzed, Ok(Some(song)) if
+    /// a song could be found in blissify's database, and Err(...) if there has
+    /// been an error while querying the database.
+    ///
+    // TODO: this should probably be something with Serialize / Deserialize,
+    // but...
     fn mpd_to_bliss_song(&self, mpd_song: &MPDSong) -> Result<Option<Song>> {
         let sql_conn = self.sqlite_conn.lock().unwrap();
 
@@ -90,13 +106,13 @@ impl MPDLibrary {
         let mut stmt = sql_conn.prepare(
             "
             select
-                song.path, feature from feature
+                feature from feature
                 inner join song on song.id = feature.song_id
                 where song.path = ? and analyzed = true
                 order by song.path, feature.feature_index
             ",
         )?;
-        let results = stmt.query_map(params![&path.to_str().unwrap()], MPDLibrary::row_closure)?;
+        let results = stmt.query_map(params![&path.to_str().unwrap()], |row| row.get(0))?;
 
         let mut song = Song {
             path: path.to_owned(),
@@ -104,7 +120,7 @@ impl MPDLibrary {
         };
         let mut analysis = vec![];
         for result in results {
-            analysis.push(result?.1);
+            analysis.push(result?);
         }
         if analysis.is_empty() {
             bail!("Song '{}' has not been analyzed.", song.path.display());
@@ -121,6 +137,10 @@ impl MPDLibrary {
         Ok(Some(song))
     }
 
+    /// Create a new MPDLibrary object.
+    ///
+    /// This means creating the necessary folders and the database file
+    /// if it doesn't exist, as well as getting a connection to MPD ready.
     fn new(mpd_base_path: String) -> Result<Self> {
         let db_folder = Self::get_database_folder();
         create_dir_all(&db_folder).with_context(|| "While creating config folder")?;
@@ -164,6 +184,8 @@ impl MPDLibrary {
         })
     }
 
+    /// Analyze the given paths to various songs, while displaying
+    /// progress on the screen with a progressbar.
     fn analyze_paths_showprogress(&mut self, paths: Vec<String>) -> Result<()> {
         let number_songs = paths.len();
         if number_songs == 0 {
@@ -204,6 +226,11 @@ impl MPDLibrary {
         Ok(())
     }
 
+    /// Update blissify database by analyzing the paths that are listed
+    /// by MPD but not currently in the database.
+    ///
+    // TODO: remove from the db the paths that are not anymore in MPD's
+    // database.
     fn update(&mut self) -> Result<()> {
         let stored_songs = self
             .get_stored_songs()?
@@ -229,6 +256,10 @@ impl MPDLibrary {
         Ok(())
     }
 
+    /// Remove the contents of the current database, and analyze all
+    /// MPD's songs again.
+    ///
+    /// Useful in case the database got corrupted somehow.
     fn full_rescan(&mut self) -> Result<()> {
         let sqlite_conn = self.sqlite_conn.lock().unwrap();
         sqlite_conn.execute("delete from feature", [])?;
@@ -239,6 +270,12 @@ impl MPDLibrary {
         Ok(())
     }
 
+    /// Get the currently playing song, and queue up to
+    /// `number_songs` songs that sound similar given the provided `distance`.
+    ///
+    /// Note: this is very generic in order to accomodate different distance
+    /// metrics. To avoid the headache, one could just remove the `distance`
+    /// parameter, and use [playlist_from_song](Library::playlist_from_song).
     fn queue_from_current_song_custom_distance(
         &self,
         number_songs: usize,
@@ -275,6 +312,10 @@ impl MPDLibrary {
 }
 
 impl Library for MPDLibrary {
+    /// Get songs stored in the SQLite database.
+    ///
+    /// One could also imagine storing songs in a plain JSONlines
+    /// or something similar.
     fn get_stored_songs(&self) -> BlissResult<Vec<Song>> {
         let sqlite_conn = self.sqlite_conn.lock().unwrap();
         let mut stmt = sqlite_conn
@@ -288,7 +329,11 @@ impl Library for MPDLibrary {
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         let results = stmt
-            .query_map([], MPDLibrary::row_closure)
+            .query_map([], |row| -> Result<(String, f32), RusqliteError> {
+                let path = row.get(0)?;
+                let feature = row.get(1)?;
+                Ok((path, feature))
+            })
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
 
         let mut songs_hashmap = HashMap::new();
@@ -318,6 +363,10 @@ impl Library for MPDLibrary {
             .collect::<BlissResult<Vec<Song>>>()
     }
 
+    /// Get the song's paths from the MPD database.
+    ///
+    /// Note: this uses [mpd_base_path](MPDLibrary::mpd_base_path) because MPD
+    /// returns paths without including MPD_BASE_PATH.
     fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         Ok(mpd_conn
@@ -335,6 +384,7 @@ impl Library for MPDLibrary {
             .collect::<Vec<String>>())
     }
 
+    /// Store a given [Song](Song) into the SQLite database.
     fn store_song(&mut self, song: &Song) -> Result<(), BlissError> {
         let mut sqlite_conn = self.sqlite_conn.lock().unwrap();
         let path = Path::new(&song.path)
@@ -384,22 +434,28 @@ impl Library for MPDLibrary {
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
 
-        let tx = sqlite_conn.transaction().map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        let tx = sqlite_conn
+            .transaction()
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         for (index, feature) in song.analysis.to_vec().iter().enumerate() {
-                tx 
-                .execute(
-                    "
+            tx.execute(
+                "
                 insert into feature (song_id, feature, feature_index)
                 values (?1, ?2, ?3)
                 ",
-                    params![last_song_id, feature, index],
-                )
-                .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+                params![last_song_id, feature, index],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         }
-        tx.commit().map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         Ok(())
     }
 
+    /// Store an errored [Song](Song) in the SQLite database.
+    ///
+    /// Note that it currently doesn't store the actual error; it just stores
+    /// the song and sets `analyzed` to `false`.
     fn store_error_song(&mut self, song_path: String, e: BlissError) -> BlissResult<()> {
         let path = song_path.strip_prefix(&self.mpd_base_path.to_str().unwrap());
         self.sqlite_conn
