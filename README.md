@@ -1,8 +1,8 @@
 [![crate](https://img.shields.io/crates/v/blissify.svg)](https://crates.io/crates/blissify)
 [![build](https://github.com/Polochon-street/blissify-rs/workflows/Rust/badge.svg)](https://github.com/Polochon-street/blissify-rs/actions)
+[![doc](https://docs.rs/blissify/badge.svg)](https://docs.rs/blissify/)
 
-Blissify - analyze an MPD library and make smart playlists
-==========================================================
+# Blissify - analyze an MPD library and make smart playlists
 
 Blissify is a program used to make playlists of songs that sound alike
 from your [MPD](https://www.musicpd.org/) track library, à la Spotify radio.
@@ -21,8 +21,7 @@ sound like your first track.
 Note: you *need* to have MPD installed to use blissify. Otherwise, you
 probably want to implement bliss-rs support for the audio player you use.
 
-Usage
-=====
+# Usage
 
 Use `cargo install blissify` to install it.
 
@@ -30,8 +29,7 @@ All the commands below read the `MPD_HOST` and `MPD_PORT` environment
 variables and try to reach MPD using that. You might want to change
 it if MPD is listening to somewhere else than `127.0.0.1:6600` (the default).
 
-Analyze a library
------------------
+## Analyze a library
 
 To analyze your MPD library, use
 ```
@@ -51,11 +49,9 @@ the current files in, you can use
 $ blissify list-db
 ```
 
-Make a playlist
----------------
+## Make a playlist
 
-Simple version
-~~~~~~~~~~~~~~
+### Simple version
 
 ```
 $ blissify playlist 100
@@ -64,8 +60,7 @@ $ blissify playlist 100
 This will add 100 songs similar to the song that is currently
 playing on MPD, starting with the closest possible.
 
-Changing the distance metric
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+### Changing the distance metric
 
 To make a playlist with a distance metric different than the default one
 (euclidean distance), which will yield different playlists, run:
@@ -78,8 +73,7 @@ $ blissify playlist 30 --distance <distance_name>
 experiment with this parameter if the generated playlists are not to your
 linking!
 
-Details
-=======
+# Details
 
 If you are interested about what is happening under the hood, or want to make
 a similar plug-in for other audio players, see
