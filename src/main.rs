@@ -226,33 +226,79 @@ impl MPDLibrary {
         Ok(())
     }
 
+    /// Remove songs in the database identified by their paths.
+    ///
+    /// Path is without `MPD_BASE_PATH` (so if the song is located at
+    /// `/home/foo/Music/artist/album/song.flac` and `MPD_BASE_PATH` is
+    /// `/home/foo/Music`, then the path should be `artist/album/song.flac`.
+    fn delete(&mut self, to_remove: Vec<String>) -> Result<()> {
+        let sqlite_conn = self.sqlite_conn.lock().unwrap();
+        let mut count = 0;
+        for item in to_remove.iter() {
+            sqlite_conn
+                .execute(
+                    "
+                    delete from feature where song_id in (
+                        select id from song where path = ?
+                    );
+                    delete from song where path = ?;
+                    ",
+                    params![item],
+                )
+                .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+            sqlite_conn
+                .execute("delete from song where path = ?;", params![item])
+                .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+            count += 1;
+        }
+        info!("Removed {} old songs from blissify's database.", count);
+        Ok(())
+    }
+
     /// Update blissify database by analyzing the paths that are listed
     /// by MPD but not currently in the database.
-    ///
-    // TODO: remove from the db the paths that are not anymore in MPD's
-    // database.
     fn update(&mut self) -> Result<()> {
         let stored_songs = self
             .get_stored_songs()?
             .iter()
+            .map(|x| x.path.to_str().unwrap().to_owned())
+            .collect::<HashSet<String>>();
+
+        let mpd_songs = {
+            let mut mpd_conn = self.mpd_conn.lock().unwrap();
+            mpd_conn
+                .list(&Term::File, &Query::default())
+                .map_err(|e| BlissError::ProviderError(e.to_string()))?
+                .into_iter()
+                .collect::<HashSet<String>>()
+        };
+
+        let to_analyze = mpd_songs
+            .difference(&stored_songs)
+            .cloned()
             .map(|x| {
                 self.mpd_base_path
-                    .join(Path::new(&x.path.to_owned()))
+                    .join(Path::new(&x))
                     .to_str()
                     .unwrap()
                     .to_owned()
             })
-            .collect::<HashSet<String>>();
-        let mpd_songs = self
-            .get_songs_paths()?
-            .into_iter()
-            .collect::<HashSet<String>>();
-        let to_analyze = mpd_songs
-            .difference(&stored_songs)
-            .cloned()
             .collect::<Vec<String>>();
         info!("Found {} new songs to analyze.", to_analyze.len());
         self.analyze_paths_showprogress(to_analyze)?;
+
+        let to_remove = stored_songs
+            .difference(&mpd_songs)
+            .cloned()
+            .collect::<Vec<String>>();
+        if to_remove.is_empty() {
+            return Ok(());
+        }
+        info!(
+            "Found {} old songs that should be removed from blissify's database.",
+            to_remove.len()
+        );
+        self.delete(to_remove)?;
         Ok(())
     }
 
@@ -847,40 +893,31 @@ mod test {
             .execute(
                 "
             insert into song (id, path, analyzed) values
-                (1, 's16_mono_22_5kHz.flac', true)
+                (1, 's16_mono_22_5kHz.flac', true),
+                (10, 'coucou.flac', true)
             ",
                 [],
             )
             .unwrap();
 
-        sqlite_conn
-            .execute(
-                "
-            insert into feature (song_id, feature, feature_index) values
-                (1, 0., 1),
-                (1, 0., 2),
-                (1, 0., 3),
-                (1, 0., 4),
-                (1, 0., 5),
-                (1, 0., 6),
-                (1, 0., 7),
-                (1, 0., 8),
-                (1, 0., 9),
-                (1, 0., 10),
-                (1, 0., 11),
-                (1, 0., 12),
-                (1, 0., 13),
-                (1, 0., 14),
-                (1, 0., 15),
-                (1, 0., 16),
-                (1, 0., 17),
-                (1, 0., 18),
-                (1, 0., 19),
-                (1, 0., 20);
-            ",
-                [],
-            )
-            .unwrap();
+        let mut sqlite_string =
+            String::from("insert into feature (song_id, feature, feature_index) values\n");
+        sqlite_string.push_str(
+            &(0..20)
+                .into_iter()
+                .map(|i| String::from(&format!("(1, 0., {})", i)))
+                .collect::<Vec<String>>()
+                .join(",\n"),
+        );
+        sqlite_string.push_str(",\n");
+        sqlite_string.push_str(
+            &(0..20)
+                .into_iter()
+                .map(|i| String::from(&format!("(10, 0., {})", i)))
+                .collect::<Vec<String>>()
+                .join(",\n"),
+        );
+        sqlite_conn.execute(&sqlite_string, []).unwrap();
         drop(sqlite_conn);
 
         library.update().unwrap();
