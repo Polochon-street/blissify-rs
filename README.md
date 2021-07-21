@@ -1,6 +1,5 @@
 [![crate](https://img.shields.io/crates/v/blissify.svg)](https://crates.io/crates/blissify)
 [![build](https://github.com/Polochon-street/blissify-rs/workflows/Rust/badge.svg)](https://github.com/Polochon-street/blissify-rs/actions)
-[![doc](https://docs.rs/blissify/badge.svg)](https://docs.rs/blissify/)
 
 # Blissify - analyze an MPD library and make smart playlists
 

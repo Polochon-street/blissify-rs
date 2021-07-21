@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.2.2
+* Fix update command to remove songs that were removed from MPD database.
+
 ## blissify 0.2.1
 * Add a `list-db` subcommand to list what was analyzed.
 * Make blissify toggle random mode off when making playlists.
