@@ -1,5 +1,9 @@
 # Changelog
 
+## blissify 0.2.3
+* Add the "seed song option".
+* Add an option to deduplicate songs in a playlist.
+
 ## blissify 0.2.2
 * Fix update command to remove songs that were removed from MPD database.
 
