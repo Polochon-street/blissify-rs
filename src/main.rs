@@ -7,7 +7,10 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::distance::{cosine_distance, euclidean_distance, DistanceMetric};
+use bliss_audio::distance::{
+    closest_to_first_song, cosine_distance, dedup_playlist_custom_distance, euclidean_distance,
+    song_to_song, DistanceMetric,
+};
 use bliss_audio::{
     library::analyze_paths_streaming, Analysis, BlissError, BlissResult, Library, Song,
     NUMBER_FEATURES,
@@ -316,17 +319,17 @@ impl MPDLibrary {
         Ok(())
     }
 
-    /// Get the currently playing song, and queue up to
-    /// `number_songs` songs that sound similar given the provided `distance`.
-    ///
-    /// Note: this is very generic in order to accomodate different distance
-    /// metrics. To avoid the headache, one could just remove the `distance`
-    /// parameter, and use [playlist_from_song](Library::playlist_from_song).
-    fn queue_from_current_song_custom_distance(
+    fn queue_from_current_song_custom<F, G>(
         &self,
         number_songs: usize,
-        distance: impl DistanceMetric,
-    ) -> Result<()> {
+        distance: G,
+        sort: F,
+        dedup: bool,
+    ) -> Result<()>
+    where
+        F: FnMut(&Song, &mut Vec<Song>, G),
+        G: DistanceMetric + Copy,
+    {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         mpd_conn.random(false)?;
         let mpd_song = match mpd_conn.currentsong()? {
@@ -337,9 +340,12 @@ impl MPDLibrary {
         let current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
             "No song is currently playing. Add a song to start the playlist from, and try again."
         })?;
-        let playlist =
-            self.playlist_from_song_custom_distance(current_song, number_songs, distance)?;
+        let mut playlist =
+            self.playlist_from_song_custom(current_song, number_songs, distance, sort)?;
 
+        if dedup {
+            dedup_playlist_custom_distance(&mut playlist, None, distance);
+        }
         let current_pos = mpd_song.place.unwrap().pos;
         mpd_conn.delete(0..current_pos)?;
         if mpd_conn.queue()?.len() > 1 {
@@ -483,7 +489,7 @@ impl Library for MPDLibrary {
         let tx = sqlite_conn
             .transaction()
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        for (index, feature) in song.analysis.to_vec().iter().enumerate() {
+        for (index, feature) in song.analysis.as_vec().iter().enumerate() {
             tx.execute(
                 "
                 insert into feature (song_id, feature, feature_index)
@@ -555,7 +561,7 @@ fn main() -> Result<()> {
         )
         .subcommand(
             SubCommand::with_name("playlist")
-            .about("Build a playlist from the currently played song")
+            .about("Erase the current playlist and make playlist of PLAYLIST_LENGTH from the currently played song")
             .arg(Arg::with_name("PLAYLIST_LENGTH")
                 .help("The desired playlist length, including the first song.")
                 .required(true)
@@ -568,6 +574,23 @@ fn main() -> Result<()> {
                     other option is 'cosine'"
                 )
                 .default_value("euclidean")
+            )
+            .arg(Arg::with_name("seed")
+                .long("seed-song")
+                .help(
+                    "Instead of making a playlist of only the closest song to the current song,\
+                    make a playlist that queues the closest song to the first song, then
+                    the closest to the second song, etc. Can take some time to build."
+                )
+                .takes_value(false)
+            )
+            .arg(Arg::with_name("dedup")
+                .long("deduplicate-songs")
+                .help(
+                    "Deduplicate songs based both on the title / artist and their\
+                     sheer proximity."
+                )
+                .takes_value(false)
             )
         )
         .get_matches();
@@ -614,7 +637,15 @@ fn main() -> Result<()> {
         };
 
         let library = MPDLibrary::new(String::from(""))?;
-        library.queue_from_current_song_custom_distance(number_songs, distance_metric)?;
+        let sort = match sub_m.is_present("seed") {
+            false => closest_to_first_song,
+            true => song_to_song,
+        };
+        if sub_m.is_present("dedup") {
+            library.queue_from_current_song_custom(number_songs, distance_metric, sort, true)?;
+        } else {
+            library.queue_from_current_song_custom(number_songs, distance_metric, sort, false)?;
+        }
     }
 
     Ok(())
@@ -709,7 +740,7 @@ mod test {
 
         drop(sqlite_conn);
         assert_eq!(
-            library.queue_from_current_song_custom_distance(20, euclidean_distance).unwrap_err().to_string(),
+            library.queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song, true).unwrap_err().to_string(),
             String::from("No song is currently playing. Add a song to start the playlist from, and try again."),
         );
     }
@@ -745,7 +776,7 @@ mod test {
         drop(sqlite_conn);
         assert_eq!(
             library
-                .queue_from_current_song_custom_distance(20, euclidean_distance)
+                .queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song, true)
                 .unwrap_err()
                 .to_string(),
             String::from("Song 'not-existing.flac' has not been analyzed."),
@@ -862,7 +893,7 @@ mod test {
             .unwrap();
         drop(sqlite_conn);
         library
-            .queue_from_current_song_custom_distance(20, euclidean_distance)
+            .queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song, false)
             .unwrap();
 
         let playlist = library
