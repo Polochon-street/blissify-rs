@@ -20,9 +20,22 @@ sound like your first track.
 Note: you *need* to have MPD installed to use blissify. Otherwise, you
 probably want to implement bliss-rs support for the audio player you use.
 
-# Usage
+# Installation / Usage
 
-Use `cargo install blissify` to install it.
+You'll need clang, pkg-config and ffmpeg libraries (including development
+headers) to install it, as well as a
+[working Rust installation](https://www.rust-lang.org/tools/install)
+
+On Debian-based systems:
+
+    apt install -y clang libavcodec-dev libavformat-dev libavutil-dev pkg-config
+
+On Archlinux:
+
+    pacman -S base-devel clang ffmpeg
+
+Finally, use `cargo install blissify` to install it.
+
 
 All the commands below read the `MPD_HOST` and `MPD_PORT` environment
 variables and try to reach MPD using that. You might want to change
@@ -34,6 +47,9 @@ To analyze your MPD library, use
 ```
 $ blissify update /path/to/mpd/root
 ```
+
+Note that it may take several minutes (up to some hours, on very large
+libraries with more than for instance 20k songs) to complete.
 
 If something goes wrong during the analysis, and the database enters an
 unstable state, you can use
