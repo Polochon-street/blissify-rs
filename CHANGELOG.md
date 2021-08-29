@@ -1,5 +1,10 @@
 # Changelog
 
+## blissify 0.2.4
+* Complete README.
+* Explicitely add ffmpeg-next to the list of libs to allow users
+  to access ffmpeg-next's flags.
+
 ## blissify 0.2.3
 * Add the "seed song option".
 * Add an option to deduplicate songs in a playlist.

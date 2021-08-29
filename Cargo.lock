@@ -131,13 +131,14 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "bliss-audio",
  "clap",
  "dirs",
  "env_logger",
+ "ffmpeg-next",
  "indicatif",
  "log",
  "mpd",
