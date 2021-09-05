@@ -117,16 +117,12 @@ impl MPDLibrary {
         )?;
         let results = stmt.query_map(params![&path.to_str().unwrap()], |row| row.get(0))?;
 
-        let mut song = Song {
-            path: path.to_owned(),
-            ..Default::default()
-        };
         let mut analysis = vec![];
         for result in results {
             analysis.push(result?);
         }
         if analysis.is_empty() {
-            bail!("Song '{}' has not been analyzed.", song.path.display());
+            bail!("Song '{}' has not been analyzed.", path.display());
         }
         let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
             BlissError::ProviderError(
@@ -136,7 +132,32 @@ impl MPDLibrary {
                     .to_string(),
             )
         })?;
-        song.analysis = Analysis::new(array);
+        let mut stmt = sql_conn.prepare(
+            "
+            select
+                title, artist, album, track_number, genre
+                from song where song.path = ? and analyzed = true
+                order by song.path;
+            ",
+        )?;
+        let result = stmt.query_row(params![&path.to_str().unwrap()], |row| {
+            let title = row.get(0).ok();
+            let artist = row.get(1).ok();
+            let album = row.get(2).ok();
+            let track_number = row.get(3).ok();
+            let genre = row.get(4).ok();
+            Ok((title, artist, album, track_number, genre))
+        })?;
+
+        let song = Song {
+            path: path.to_owned(),
+            analysis: Analysis::new(array),
+            title: result.0,
+            artist: result.1,
+            album: result.2,
+            track_number: result.3,
+            genre: result.4,
+        };
         Ok(Some(song))
     }
 
@@ -718,6 +739,77 @@ mod test {
         pub fn get_database_folder() -> PathBuf {
             TempDir::new("test").unwrap().path().to_path_buf()
         }
+    }
+
+    #[test]
+    fn test_mpd_to_bliss_song() {
+        let library = MPDLibrary::new(String::from("path/")).unwrap();
+
+        {
+            let sqlite_conn = library.sqlite_conn.lock().unwrap();
+            sqlite_conn
+                .execute(
+                    "
+                insert into song (id, path, title, artist, album, genre, analyzed) values
+                    (1,'path/first_song.flac', 'First Song', 'Art Ist', 'Al Bum', 'Techno', true);
+                ",
+                    [],
+                )
+                .unwrap();
+
+            sqlite_conn
+                .execute(
+                    "
+                insert into feature (song_id, feature, feature_index) values
+                    (1, 0., 1),
+                    (1, 0., 2),
+                    (1, 0., 3),
+                    (1, 0., 4),
+                    (1, 0., 5),
+                    (1, 0., 6),
+                    (1, 0., 7),
+                    (1, 0., 8),
+                    (1, 0., 9),
+                    (1, 0., 10),
+                    (1, 0., 11),
+                    (1, 0., 12),
+                    (1, 0., 13),
+                    (1, 0., 14),
+                    (1, 0., 15),
+                    (1, 0., 16),
+                    (1, 0., 17),
+                    (1, 0., 18),
+                    (1, 0., 19),
+                    (1, 0.3, 20);
+                 ",
+                    [],
+                )
+                .unwrap();
+        }
+        let mpd_song = MPDSong {
+            file: String::from("first_song.flac"),
+            name: Some(String::from("First Song")),
+            place: Some(QueuePlace {
+                id: Id(1),
+                pos: 50,
+                prio: 0,
+            }),
+            ..Default::default()
+        };
+        let analysis = Analysis::new([
+            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.3,
+        ]);
+        let song = library.mpd_to_bliss_song(&mpd_song).unwrap().unwrap();
+        let expected_song = Song {
+            path: PathBuf::from("path/first_song.flac"),
+            title: Some(String::from("First Song")),
+            artist: Some(String::from("Art Ist")),
+            album: Some(String::from("Al Bum")),
+            genre: Some(String::from("Techno")),
+            analysis: analysis,
+            ..Default::default()
+        };
+        assert_eq!(song, expected_song);
     }
 
     #[test]
