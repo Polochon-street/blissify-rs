@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.2.5
+* Complete "mpd_to_bliss" to make the deduplication option work better.
+
 ## blissify 0.2.4
 * Complete README.
 * Explicitely add ffmpeg-next to the list of libs to allow users
