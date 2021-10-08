@@ -340,6 +340,45 @@ impl MPDLibrary {
         Ok(())
     }
 
+    fn queue_from_current_album(&self, number_albums: usize) -> Result<()> {
+        let mut mpd_conn = self.mpd_conn.lock().unwrap();
+        mpd_conn.random(false)?;
+        let mpd_song = match mpd_conn.currentsong()? {
+            Some(s) => s,
+            None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
+        };
+
+        let current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
+            "No song is currently playing. Add a song to start the playlist from, and try again."
+        })?;
+        let current_album = current_song.album.ok_or_else(|| {
+            BlissError::ProviderError(String::from(
+                "The current song does not have album information.",
+            ))
+        })?;
+        let playlist = self.playlist_from_songs_album(&current_album, number_albums)?;
+
+        let current_pos = mpd_song.place.unwrap().pos;
+        mpd_conn.delete(0..current_pos)?;
+        if mpd_conn.queue()?.len() > 1 {
+            mpd_conn.delete(1..)?;
+        }
+        let mut index: usize = 1;
+        if let Some(track_number) = &current_song.track_number {
+            if let Ok(track_number) = track_number.parse::<usize>() {
+                index = track_number;
+            }
+        }
+        for song in &playlist[index..] {
+            let mpd_song = MPDSong {
+                file: song.path.to_string_lossy().to_string(),
+                ..Default::default()
+            };
+            mpd_conn.push(mpd_song)?;
+        }
+        Ok(())
+    }
+
     fn queue_from_current_song_custom<F, G>(
         &self,
         number_songs: usize,
@@ -395,29 +434,36 @@ impl Library for MPDLibrary {
             .prepare(
                 "
                 select
-                    song.path, feature from feature
+                    song.path, feature, album, track_number from feature
                     inner join song on song.id = feature.song_id
                     where song.analyzed = true order by path;
                 ",
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
         let results = stmt
-            .query_map([], |row| -> Result<(String, f32), RusqliteError> {
-                let path = row.get(0)?;
-                let feature = row.get(1)?;
-                Ok((path, feature))
-            })
+            .query_map(
+                [],
+                |row| -> Result<(String, f32, String, String), RusqliteError> {
+                    let path = row.get(0)?;
+                    let feature = row.get(1)?;
+                    let album = row.get(2).unwrap_or_else(|_| String::from(""));
+                    let track_number = row.get(3).unwrap_or_else(|_| String::from(""));
+                    Ok((path, feature, album, track_number))
+                },
+            )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
 
         let mut songs_hashmap = HashMap::new();
         for result in results {
             let result = result.map_err(|e| BlissError::ProviderError(e.to_string()))?;
-            let song_entry = songs_hashmap.entry(result.0).or_insert_with(Vec::new);
-            song_entry.push(result.1);
+            let song_entry = songs_hashmap
+                .entry(result.0.to_owned())
+                .or_insert_with(|| (vec![], result.2.to_owned(), result.3.to_owned()));
+            song_entry.0.push(result.1);
         }
         songs_hashmap
             .into_iter()
-            .map(|(path, analysis)| {
+            .map(|(path, (analysis, album, track_number))| {
                 let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
                     BlissError::ProviderError(
                         "Too many or too little features were provided at the end of \
@@ -426,10 +472,17 @@ impl Library for MPDLibrary {
                             .to_string(),
                     )
                 })?;
-
+                let track_number = if track_number.is_empty() {
+                    None
+                } else {
+                    Some(track_number)
+                };
+                let album = if album.is_empty() { None } else { Some(album) };
                 Ok(Song {
                     path: PathBuf::from(&path),
                     analysis: Analysis::new(array),
+                    track_number,
+                    album,
                     ..Default::default()
                 })
             })
@@ -584,7 +637,7 @@ fn main() -> Result<()> {
             SubCommand::with_name("playlist")
             .about("Erase the current playlist and make playlist of PLAYLIST_LENGTH from the currently played song")
             .arg(Arg::with_name("PLAYLIST_LENGTH")
-                .help("The desired playlist length, including the first song.")
+                .help("Number of items to queue, including the first song.")
                 .required(true)
             )
             .arg(Arg::with_name("distance")
@@ -611,6 +664,11 @@ fn main() -> Result<()> {
                     "Deduplicate songs based both on the title / artist and their\
                      sheer proximity."
                 )
+                .takes_value(false)
+            )
+            .arg(Arg::with_name("album")
+                .long("album-playlist")
+                .help("Make a playlist of similar albums from the current album.")
                 .takes_value(false)
             )
         )
@@ -647,25 +705,39 @@ fn main() -> Result<()> {
             Ok(n) => n,
         };
 
-        let distance_metric = if let Some(m) = sub_m.value_of("distance") {
-            match m {
-                "euclidean" => euclidean_distance,
-                "cosine" => cosine_distance,
-                _ => bail!("Please choose a distance name, between 'euclidean' and 'cosine'."),
-            }
-        } else {
-            euclidean_distance
-        };
-
         let library = MPDLibrary::new(String::from(""))?;
-        let sort = match sub_m.is_present("seed") {
-            false => closest_to_first_song,
-            true => song_to_song,
-        };
-        if sub_m.is_present("dedup") {
-            library.queue_from_current_song_custom(number_songs, distance_metric, sort, true)?;
+        if sub_m.is_present("album") {
+            library.queue_from_current_album(number_songs)?;
         } else {
-            library.queue_from_current_song_custom(number_songs, distance_metric, sort, false)?;
+            let distance_metric = if let Some(m) = sub_m.value_of("distance") {
+                match m {
+                    "euclidean" => euclidean_distance,
+                    "cosine" => cosine_distance,
+                    _ => bail!("Please choose a distance name, between 'euclidean' and 'cosine'."),
+                }
+            } else {
+                euclidean_distance
+            };
+
+            let sort = match sub_m.is_present("seed") {
+                false => closest_to_first_song,
+                true => song_to_song,
+            };
+            if sub_m.is_present("dedup") {
+                library.queue_from_current_song_custom(
+                    number_songs,
+                    distance_metric,
+                    sort,
+                    true,
+                )?;
+            } else {
+                library.queue_from_current_song_custom(
+                    number_songs,
+                    distance_metric,
+                    sort,
+                    false,
+                )?;
+            }
         }
     }
 
@@ -806,7 +878,7 @@ mod test {
             artist: Some(String::from("Art Ist")),
             album: Some(String::from("Al Bum")),
             genre: Some(String::from("Techno")),
-            analysis: analysis,
+            analysis,
             ..Default::default()
         };
         assert_eq!(song, expected_song);
@@ -905,11 +977,11 @@ mod test {
         sqlite_conn
             .execute(
                 "
-            insert into song (id, path, analyzed) values
-                (1,'path/first_song.flac', true),
-                (2,'path/second_song.flac', true),
-                (3,'path/last_song.flac', true),
-                (4,'path/unanalyzed.flac', false)
+            insert into song (id, path, analyzed, album, track_number) values
+                (1,'path/first_song.flac', true, 'Coucou', '01'),
+                (2,'path/second_song.flac', true, 'Swag', '01'),
+                (3,'path/last_song.flac', true, 'Coucou', '02'),
+                (4,'path/unanalyzed.flac', false, null, null)
             ",
                 [],
             )
@@ -1003,6 +1075,49 @@ mod test {
                 String::from("path/first_song.flac"),
                 String::from("path/second_song.flac"),
                 String::from("path/last_song.flac"),
+            ],
+        );
+
+        library.mpd_conn.lock().unwrap().mpd_queue = vec![
+            MPDSong {
+                file: String::from("path/first_song.flac"),
+                name: Some(String::from("Coucou")),
+                place: Some(QueuePlace {
+                    id: Id(1),
+                    pos: 0,
+                    prio: 0,
+                }),
+                ..Default::default()
+            },
+            MPDSong {
+                file: String::from("path/random_song.flac"),
+                name: Some(String::from("Coucou")),
+                place: Some(QueuePlace {
+                    id: Id(1),
+                    pos: 1,
+                    prio: 0,
+                }),
+                ..Default::default()
+            },
+        ];
+
+        library.queue_from_current_album(20).unwrap();
+
+        let playlist = library
+            .mpd_conn
+            .lock()
+            .unwrap()
+            .mpd_queue
+            .iter()
+            .map(|x| x.file.to_owned())
+            .collect::<Vec<String>>();
+
+        assert_eq!(
+            playlist,
+            vec![
+                String::from("path/first_song.flac"),
+                String::from("path/last_song.flac"),
+                String::from("path/second_song.flac"),
             ],
         );
     }
