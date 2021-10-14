@@ -81,12 +81,35 @@ To make a playlist with a distance metric different than the default one
 (euclidean distance), which will yield different playlists, run:
 
 ```
-$ blissify playlist 30 --distance <distance_name>
+$ blissify playlist --distance <distance_name> 30
 ```
 
 `distance_name` is currently `euclidean` and `cosine`. Don't hesitate to
 experiment with this parameter if the generated playlists are not to your
 linking!
+
+### Make a "seeded" playlist
+
+Instead of making a playlist with songs that are only similar to the first song,
+from the most similar to the least similar (the default), you can make a
+playlist that queues the closest song to the first song, then the closest song
+the second song, etc, effectively making "path" through the songs.
+
+To try it out (it can take a bit more time to build the playlist):
+```
+$ blissify playlist --seed-song 30
+```
+
+### Make an album playlist
+
+You can also make a playlist of album that sound like the current album
+your listening to (more specifically, the album of the current song you're
+playling, regardless of whether you queued the full album or not).
+
+To try it out:
+```
+$ blissify playlist --album-playlist 30
+```
 
 # Details
 

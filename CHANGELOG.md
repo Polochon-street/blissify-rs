@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.2.6
+* Add an option to make an album playlist.
+
 ## blissify 0.2.5
 * Complete "mpd_to_bliss" to make the deduplication option work better.
 
