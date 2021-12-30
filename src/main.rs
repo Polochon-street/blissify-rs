@@ -8,8 +8,8 @@
 //! --playlist.
 use anyhow::{bail, Context, Result};
 use bliss_audio::distance::{
-    closest_to_first_song, cosine_distance, dedup_playlist_custom_distance, euclidean_distance,
-    song_to_song, DistanceMetric,
+    closest_to_first_song, cosine_distance, dedup_playlist, dedup_playlist_custom_distance,
+    euclidean_distance, song_to_song, DistanceMetric,
 };
 use bliss_audio::{
     library::analyze_paths_streaming, Analysis, BlissError, BlissResult, Library, Song,
@@ -26,7 +26,9 @@ use mpd::search::{Query, Term};
 use mpd::song::Song as MPDSong;
 #[cfg(not(test))]
 use mpd::Client;
+use noisy_float::prelude::*;
 use rusqlite::{params, Connection, Error as RusqliteError};
+use std::char;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 #[cfg(not(test))]
@@ -34,6 +36,12 @@ use std::env;
 use std::fs::create_dir_all;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use std::io;
+use std::io::Write;
+
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
 
 /// The main struct that implements the Library trait, and some other
 /// helper functions to make everything work properly.
@@ -421,6 +429,153 @@ impl MPDLibrary {
         }
         Ok(())
     }
+
+    pub fn make_interactive_playlist(
+        &mut self,
+        continue_playlist: bool,
+        number_choices: usize,
+    ) -> Result<()> {
+        let mut mpd_conn = self.mpd_conn.lock().unwrap();
+        mpd_conn.random(false)?;
+        let mpd_song = if !continue_playlist {
+            match mpd_conn.currentsong()? {
+                Some(s) => s,
+                None => bail!(
+                    "No song is currently playing. Add a song to start \
+                    the playlist from, and try again.",
+                ),
+            }
+        } else {
+            match mpd_conn.queue()?.last() {
+                Some(s) => s.to_owned(),
+                None => bail!(
+                    "The current playlist is empty. Add at least a song \
+                    to start the playlist from, and try again.",
+                ),
+            }
+        };
+
+        let mut current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
+            "The current song is not in bliss' database. Run `blissify \
+            update /path/to/mpd` and try again."
+        })?;
+        println!(
+            "The playlist will start from: '{} - {}'.",
+            current_song
+                .artist
+                .as_deref()
+                .unwrap_or("<No artist>"),
+            current_song
+                .title
+                .as_deref()
+                .unwrap_or("<No title>"),
+        );
+
+        // Remove all songs from the playlist except the first one.
+        if !continue_playlist {
+            let current_pos = mpd_song.place.unwrap().pos;
+            mpd_conn.delete(0..current_pos)?;
+            if mpd_conn.queue()?.len() > 1 {
+                mpd_conn.delete(1..)?;
+            }
+        }
+        let mut songs = self.get_stored_songs()?;
+        let mut playlist = mpd_conn
+            .queue()?
+            .iter()
+            .map(|s| self.mpd_to_bliss_song(s))
+            .collect::<Result<Option<Vec<Song>>>>()?
+            .with_context(|| {
+                "No song is currently playing. Add a song to start the \
+                playlist from, and try again."
+            })?;
+        songs.retain(|s| !playlist.contains(s));
+        println!(
+            "The three closest songs will be displayed. Input '1' or 'Enter' \
+            to queue the first one, '2' to queue the second one, and '3' \
+            for the third one. 'q' or ctrl + c quits the session when you're \
+            done.",
+        );
+        while songs.len() > number_choices {
+            if !playlist.is_empty() {
+                println!(
+                    "Current playlist:\n{}\n",
+                    playlist
+                        .iter()
+                        .map(|s| format!(
+                            "\t{} - {}'",
+                            s.to_owned()
+                                .artist
+                                .unwrap_or_else(|| String::from("No artist")),
+                            s.to_owned()
+                                .title
+                                .unwrap_or_else(|| String::from("No title"))
+                        ))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                );
+            }
+            songs.sort_by_cached_key(|song| n32(current_song.distance(song)));
+            dedup_playlist(&mut songs, None);
+            for (i, song) in songs[1..number_choices+1].iter().enumerate() {
+                println!(
+                    "{}: '{} - {}'",
+                    i + 1,
+                    song
+                        .artist
+                        .as_ref()
+                        .unwrap_or(&String::from("<No artist>")),
+                    song
+                        .title
+                        .as_ref()
+                        .unwrap_or(&String::from("<No title>")),
+                );
+            }
+
+            use std::io::stdin;
+            let mut stdout = io::stdout().into_raw_mode().unwrap();
+            let stdin = stdin();
+            let mut next_song = None;
+            let number_choices_digit = char::from_digit(number_choices as u32, 10).unwrap();
+            for key in stdin.keys() {
+                next_song = if let Ok(key) = key {
+                    match key {
+                        termion::event::Key::Char('1') | termion::event::Key::Char('\n') => {
+                            let mpd_song = MPDSong {
+                                file: songs[1].path.to_string_lossy().to_string(),
+                                ..Default::default()
+                            };
+                            mpd_conn.push(mpd_song)?;
+                            let song = songs.remove(1);
+                            playlist.push(song.to_owned());
+                            Some(song)
+                        }
+                        termion::event::Key::Char(c @ '2'..='9') if c <= number_choices_digit => {
+                            let mpd_song = MPDSong {
+                                file: songs[char::to_digit(c, 10).unwrap() as usize].path.to_string_lossy().to_string(),
+                                ..Default::default()
+                            };
+                            mpd_conn.push(mpd_song)?;
+                            let song = songs.remove(char::to_digit(c, 10).unwrap() as usize);
+                            playlist.push(song.to_owned());
+                            Some(song)
+                        }
+                        termion::event::Key::Char('q') | termion::event::Key::Ctrl('c') => None,
+                        _ => continue,
+                    }
+                } else {
+                    continue;
+                };
+                break;
+            }
+            if next_song.is_none() {
+                break;
+            }
+            current_song = next_song.unwrap();
+            write!(stdout, "{}", termion::clear::All).unwrap();
+        }
+        Ok(())
+    }
 }
 
 impl Library for MPDLibrary {
@@ -434,7 +589,8 @@ impl Library for MPDLibrary {
             .prepare(
                 "
                 select
-                    song.path, feature, album, track_number from feature
+                    song.path, feature, album, track_number, title,
+                    artist, genre from feature
                     inner join song on song.id = feature.song_id
                     where song.analyzed = true order by path;
                 ",
@@ -443,12 +599,18 @@ impl Library for MPDLibrary {
         let results = stmt
             .query_map(
                 [],
-                |row| -> Result<(String, f32, String, String), RusqliteError> {
+                |row| -> Result<
+                    (String, f32, String, String, String, String, String),
+                    RusqliteError,
+                > {
                     let path = row.get(0)?;
                     let feature = row.get(1)?;
                     let album = row.get(2).unwrap_or_else(|_| String::from(""));
                     let track_number = row.get(3).unwrap_or_else(|_| String::from(""));
-                    Ok((path, feature, album, track_number))
+                    let title = row.get(4).unwrap_or_else(|_| String::from(""));
+                    let artist = row.get(5).unwrap_or_else(|_| String::from(""));
+                    let genre = row.get(6).unwrap_or_else(|_| String::from(""));
+                    Ok((path, feature, album, track_number, title, artist, genre))
                 },
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
@@ -456,36 +618,54 @@ impl Library for MPDLibrary {
         let mut songs_hashmap = HashMap::new();
         for result in results {
             let result = result.map_err(|e| BlissError::ProviderError(e.to_string()))?;
-            let song_entry = songs_hashmap
-                .entry(result.0.to_owned())
-                .or_insert_with(|| (vec![], result.2.to_owned(), result.3.to_owned()));
+            let song_entry = songs_hashmap.entry(result.0.to_owned()).or_insert_with(|| {
+                (
+                    vec![],
+                    result.2.to_owned(),
+                    result.3.to_owned(),
+                    result.4.to_owned(),
+                    result.5.to_owned(),
+                    result.6.to_owned(),
+                )
+            });
             song_entry.0.push(result.1);
         }
         songs_hashmap
             .into_iter()
-            .map(|(path, (analysis, album, track_number))| {
-                let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
-                    BlissError::ProviderError(
-                        "Too many or too little features were provided at the end of \
+            .map(
+                |(path, (analysis, album, track_number, title, artist, genre))| {
+                    let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
+                        BlissError::ProviderError(
+                            "Too many or too little features were provided at the end of \
                         the analysis. You might be using an older version of blissify \
                         with a newer bliss."
-                            .to_string(),
-                    )
-                })?;
-                let track_number = if track_number.is_empty() {
-                    None
-                } else {
-                    Some(track_number)
-                };
-                let album = if album.is_empty() { None } else { Some(album) };
-                Ok(Song {
-                    path: PathBuf::from(&path),
-                    analysis: Analysis::new(array),
-                    track_number,
-                    album,
-                    ..Default::default()
-                })
-            })
+                                .to_string(),
+                        )
+                    })?;
+                    let genre = if genre.is_empty() { None } else { Some(genre) };
+                    let track_number = if track_number.is_empty() {
+                        None
+                    } else {
+                        Some(track_number)
+                    };
+                    let album = if album.is_empty() { None } else { Some(album) };
+                    let artist = if artist.is_empty() {
+                        None
+                    } else {
+                        Some(artist)
+                    };
+                    let title = if title.is_empty() { None } else { Some(title) };
+                    Ok(Song {
+                        path: PathBuf::from(&path),
+                        analysis: Analysis::new(array),
+                        track_number,
+                        album,
+                        title,
+                        artist,
+                        genre,
+                    })
+                },
+            )
             .collect::<BlissResult<Vec<Song>>>()
     }
 
@@ -672,6 +852,30 @@ fn main() -> Result<()> {
                 .takes_value(false)
             )
         )
+        .subcommand(
+            SubCommand::with_name("interactive-playlist")
+            .about(
+                "Make a playlist, prompting a set of close songs, \
+                and asking which one will be the most appropriate."
+            )
+            .arg(Arg::with_name("continue")
+                .long("continue")
+                .help(
+                    "Take the current playlist's last song as a starting \
+                    point, instead of removing the current playlist and \
+                    starting from the first song."
+                )
+            )
+            .arg(Arg::with_name("choices")
+                .long("number-choices")
+                .value_name("choices")
+                .help(
+                    "Choose the number of proposed items you get each time. \
+                    Defaults to 3, cannot be more than 9."
+                )
+                .default_value("3")
+            )
+        )
         .get_matches();
 
     if let Some(sub_m) = matches.subcommand_matches("list-db") {
@@ -738,6 +942,14 @@ fn main() -> Result<()> {
                     false,
                 )?;
             }
+        }
+    } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
+        let number_choices: usize = sub_m.value_of("choices").unwrap_or("3").parse()?;
+        let mut library = MPDLibrary::new(String::from(""))?;
+        if sub_m.is_present("continue") {
+            library.make_interactive_playlist(true, number_choices)?;
+        } else {
+            library.make_interactive_playlist(false, number_choices)?;
         }
     }
 
