@@ -111,6 +111,24 @@ To try it out:
 $ blissify playlist --album-playlist 30
 ```
 
+### Make an interactive playlist
+
+Interactive playlists start from a song, and let you choose which song should
+be played next among the 3 closest songs (the number of songs displayed is
+can be set manually):
+
+```
+$ blissify playlist --interactive-playlist --number-choices 5
+```
+
+By default, it crops the current playlist to just keep the currently played
+song. If you want to just start from the last song and continue from there, use
+`--continue`:
+
+```
+$ blissify playlist --interactive-playlist --number-choices 5 --continue
+```
+
 # Details
 
 If you are interested about what is happening under the hood, or want to make

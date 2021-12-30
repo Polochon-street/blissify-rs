@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.2.7
+* Add an option to make an interactive playlist.
+
 ## blissify 0.2.6
 * Add an option to make an album playlist.
 
