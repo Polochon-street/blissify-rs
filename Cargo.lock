@@ -88,9 +88,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bliss-audio"
-version = "0.4.1"
+version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23a6d39ca691702a813d4d903d6c97a49fa40129bf3906b06003143ffc339b14"
+checksum = "9d0b2c4717cf81f58eb01c3134061f948ec65c7675d4055dbc8740389ee961f0"
 dependencies = [
  "bliss-audio-aubio-rs",
  "crossbeam",
@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "bliss-audio",
