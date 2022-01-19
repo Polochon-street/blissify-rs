@@ -13,7 +13,7 @@ use bliss_audio::distance::{
 };
 use bliss_audio::{
     library::analyze_paths_streaming, Analysis, BlissError, BlissResult, Library, Song,
-    NUMBER_FEATURES,
+    FEATURES_VERSION, NUMBER_FEATURES,
 };
 use clap::{App, Arg, SubCommand};
 #[cfg(not(test))]
@@ -33,7 +33,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 #[cfg(not(test))]
 use std::env;
-use std::fs::create_dir_all;
+use std::fs::{create_dir_all, remove_file};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -143,7 +143,7 @@ impl MPDLibrary {
         let mut stmt = sql_conn.prepare(
             "
             select
-                title, artist, album, track_number, genre
+                title, artist, album, track_number, genre, version
                 from song where song.path = ? and analyzed = true
                 order by song.path;
             ",
@@ -154,7 +154,8 @@ impl MPDLibrary {
             let album = row.get(2).ok();
             let track_number = row.get(3).ok();
             let genre = row.get(4).ok();
-            Ok((title, artist, album, track_number, genre))
+            let version = row.get(5).ok();
+            Ok((title, artist, album, track_number, genre, version))
         })?;
 
         let song = Song {
@@ -165,6 +166,7 @@ impl MPDLibrary {
             album: result.2,
             track_number: result.3,
             genre: result.4,
+            features_version: result.5.unwrap(),
         };
         Ok(Some(song))
     }
@@ -189,6 +191,7 @@ impl MPDLibrary {
                 track_number text,
                 genre text,
                 stamp timestamp default current_timestamp,
+                version integer not null default 1,
                 analyzed boolean default false
             );
             ",
@@ -208,6 +211,16 @@ impl MPDLibrary {
             ",
             [],
         )?;
+        let versions: u32 =
+            sqlite_conn.query_row("select count(distinct version) from song", [], |row| {
+                row.get(0)
+            })?;
+        if versions > 1 {
+            println!(
+                "The audio database has been analyzed with two incompatible versions of bliss-rs. \
+                if is recommended to `update` or `rescan` it before anything else."
+            );
+        }
 
         Ok(MPDLibrary {
             mpd_base_path: PathBuf::from(mpd_base_path),
@@ -262,7 +275,7 @@ impl MPDLibrary {
     ///
     /// Path is without `MPD_BASE_PATH` (so if the song is located at
     /// `/home/foo/Music/artist/album/song.flac` and `MPD_BASE_PATH` is
-    /// `/home/foo/Music`, then the path should be `artist/album/song.flac`.
+    /// `/home/foo/Music`, then the path should be `artist/album/song.flac`).
     fn delete(&mut self, to_remove: Vec<String>) -> Result<()> {
         let sqlite_conn = self.sqlite_conn.lock().unwrap();
         let mut count = 0;
@@ -293,6 +306,7 @@ impl MPDLibrary {
         let stored_songs = self
             .get_stored_songs()?
             .iter()
+            .filter(|x| x.features_version == FEATURES_VERSION)
             .map(|x| x.path.to_str().unwrap().to_owned())
             .collect::<HashSet<String>>();
 
@@ -327,7 +341,7 @@ impl MPDLibrary {
             return Ok(());
         }
         info!(
-            "Found {} old songs that should be removed from blissify's database.",
+            "Found {} old songs that will be removed from blissify's database.",
             to_remove.len()
         );
         self.delete(to_remove)?;
@@ -342,6 +356,7 @@ impl MPDLibrary {
         let sqlite_conn = self.sqlite_conn.lock().unwrap();
         sqlite_conn.execute("delete from feature", [])?;
         sqlite_conn.execute("delete from song", [])?;
+
         drop(sqlite_conn);
         let paths = self.get_songs_paths()?;
         self.analyze_paths_showprogress(paths)?;
@@ -461,14 +476,8 @@ impl MPDLibrary {
         })?;
         println!(
             "The playlist will start from: '{} - {}'.",
-            current_song
-                .artist
-                .as_deref()
-                .unwrap_or("<No artist>"),
-            current_song
-                .title
-                .as_deref()
-                .unwrap_or("<No title>"),
+            current_song.artist.as_deref().unwrap_or("<No artist>"),
+            current_song.title.as_deref().unwrap_or("<No title>"),
         );
 
         // Remove all songs from the playlist except the first one.
@@ -479,7 +488,18 @@ impl MPDLibrary {
                 mpd_conn.delete(1..)?;
             }
         }
-        let mut songs = self.get_stored_songs()?;
+        let all_songs = self.get_stored_songs()?;
+        let all_songs_count = all_songs.len();
+        let mut songs = all_songs
+            .into_iter()
+            .filter(|s| s.features_version == current_song.features_version)
+            .collect::<Vec<Song>>();
+        if all_songs_count != songs.len() {
+            println!(
+                "Some songs have been analyzed with a different bliss version. \
+                Please update or rescan your library."
+            );
+        }
         let mut playlist = mpd_conn
             .queue()?
             .iter()
@@ -517,18 +537,12 @@ impl MPDLibrary {
             }
             songs.sort_by_cached_key(|song| n32(current_song.distance(song)));
             dedup_playlist(&mut songs, None);
-            for (i, song) in songs[1..number_choices+1].iter().enumerate() {
+            for (i, song) in songs[1..number_choices + 1].iter().enumerate() {
                 println!(
                     "{}: '{} - {}'",
                     i + 1,
-                    song
-                        .artist
-                        .as_ref()
-                        .unwrap_or(&String::from("<No artist>")),
-                    song
-                        .title
-                        .as_ref()
-                        .unwrap_or(&String::from("<No title>")),
+                    song.artist.as_ref().unwrap_or(&String::from("<No artist>")),
+                    song.title.as_ref().unwrap_or(&String::from("<No title>")),
                 );
             }
 
@@ -552,7 +566,10 @@ impl MPDLibrary {
                         }
                         termion::event::Key::Char(c @ '2'..='9') if c <= number_choices_digit => {
                             let mpd_song = MPDSong {
-                                file: songs[char::to_digit(c, 10).unwrap() as usize].path.to_string_lossy().to_string(),
+                                file: songs[char::to_digit(c, 10).unwrap() as usize]
+                                    .path
+                                    .to_string_lossy()
+                                    .to_string(),
                                 ..Default::default()
                             };
                             mpd_conn.push(mpd_song)?;
@@ -590,7 +607,7 @@ impl Library for MPDLibrary {
                 "
                 select
                     song.path, feature, album, track_number, title,
-                    artist, genre from feature
+                    artist, genre, version from feature
                     inner join song on song.id = feature.song_id
                     where song.analyzed = true order by path;
                 ",
@@ -600,7 +617,7 @@ impl Library for MPDLibrary {
             .query_map(
                 [],
                 |row| -> Result<
-                    (String, f32, String, String, String, String, String),
+                    (String, f32, String, String, String, String, String, u16),
                     RusqliteError,
                 > {
                     let path = row.get(0)?;
@@ -610,7 +627,17 @@ impl Library for MPDLibrary {
                     let title = row.get(4).unwrap_or_else(|_| String::from(""));
                     let artist = row.get(5).unwrap_or_else(|_| String::from(""));
                     let genre = row.get(6).unwrap_or_else(|_| String::from(""));
-                    Ok((path, feature, album, track_number, title, artist, genre))
+                    let version = row.get(7).unwrap_or(1);
+                    Ok((
+                        path,
+                        feature,
+                        album,
+                        track_number,
+                        title,
+                        artist,
+                        genre,
+                        version,
+                    ))
                 },
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
@@ -626,6 +653,7 @@ impl Library for MPDLibrary {
                     result.4.to_owned(),
                     result.5.to_owned(),
                     result.6.to_owned(),
+                    result.7,
                 )
             });
             song_entry.0.push(result.1);
@@ -633,7 +661,7 @@ impl Library for MPDLibrary {
         songs_hashmap
             .into_iter()
             .map(
-                |(path, (analysis, album, track_number, title, artist, genre))| {
+                |(path, (analysis, album, track_number, title, artist, genre, version))| {
                     let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
                         BlissError::ProviderError(
                             "Too many or too little features were provided at the end of \
@@ -663,6 +691,7 @@ impl Library for MPDLibrary {
                         title,
                         artist,
                         genre,
+                        features_version: version,
                     })
                 },
             )
@@ -701,10 +730,10 @@ impl Library for MPDLibrary {
                 "
             insert into song (
                 path, artist, title, album,
-                track_number, genre, analyzed
+                track_number, genre, analyzed, version
             )
             values (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
             )
             on conflict(path)
             do update set
@@ -713,7 +742,8 @@ impl Library for MPDLibrary {
                 album=excluded.album,
                 track_number=excluded.track_number,
                 genre=excluded.genre,
-                analyzed=excluded.analyzed
+                analyzed=excluded.analyzed,
+                version=excluded.version
             ",
                 params![
                     path.to_str(),
@@ -723,6 +753,7 @@ impl Library for MPDLibrary {
                     song.track_number,
                     song.genre,
                     true,
+                    song.features_version,
                 ],
             )
             .map_err(|e| BlissError::ProviderError(e.to_string()))?;
@@ -894,8 +925,12 @@ fn main() -> Result<()> {
             }
         }
     } else if let Some(sub_m) = matches.subcommand_matches("rescan") {
+        let db_folder = MPDLibrary::get_database_folder();
+        let db_path = db_folder.join(Path::new("songs.db"));
+        remove_file(db_path)?;
         let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
         let mut library = MPDLibrary::new(base_path.to_string())?;
+
         library.full_rescan()?;
     } else if let Some(sub_m) = matches.subcommand_matches("update") {
         let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
@@ -1034,8 +1069,8 @@ mod test {
             sqlite_conn
                 .execute(
                     "
-                insert into song (id, path, title, artist, album, genre, analyzed) values
-                    (1,'path/first_song.flac', 'First Song', 'Art Ist', 'Al Bum', 'Techno', true);
+                insert into song (id, path, title, artist, album, genre, analyzed, version) values
+                    (1,'path/first_song.flac', 'First Song', 'Art Ist', 'Al Bum', 'Techno', true, 2);
                 ",
                     [],
                 )
@@ -1091,6 +1126,7 @@ mod test {
             album: Some(String::from("Al Bum")),
             genre: Some(String::from("Techno")),
             analysis,
+            features_version: 2,
             ..Default::default()
         };
         assert_eq!(song, expected_song);
