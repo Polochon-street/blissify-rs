@@ -7,13 +7,12 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::distance::{
-    closest_to_first_song, cosine_distance, dedup_playlist, dedup_playlist_custom_distance,
-    euclidean_distance, song_to_song, DistanceMetric,
+use bliss_audio::playlist::{
+    closest_album_to_group, closest_to_first_song, cosine_distance, dedup_playlist,
+    dedup_playlist_custom_distance, euclidean_distance, song_to_song, DistanceMetric,
 };
 use bliss_audio::{
-    library::analyze_paths_streaming, Analysis, BlissError, BlissResult, Library, Song,
-    FEATURES_VERSION, NUMBER_FEATURES,
+    analyze_paths, Analysis, BlissError, BlissResult, Song, FEATURES_VERSION, NUMBER_FEATURES,
 };
 use clap::{App, Arg, SubCommand};
 #[cfg(not(test))]
@@ -167,6 +166,7 @@ impl MPDLibrary {
             track_number: result.3,
             genre: result.4,
             features_version: result.5.unwrap(),
+            ..Default::default()
         };
         Ok(Some(song))
     }
@@ -188,6 +188,8 @@ impl MPDLibrary {
                 artist text,
                 title text,
                 album text,
+                album_artist text,
+                duration integer,
                 track_number text,
                 genre text,
                 stamp timestamp default current_timestamp,
@@ -247,10 +249,9 @@ impl MPDLibrary {
             .progress_chars("##-");
         pb.set_style(style);
 
-        let results = analyze_paths_streaming(paths)?;
         let mut success_count = 0;
         let mut failure_count = 0;
-        for (path, result) in results {
+        for (path, result) in analyze_paths(&paths) {
             pb.set_message(format!("Analyzing {}", path));
             match result {
                 Ok(song) => {
@@ -379,7 +380,49 @@ impl MPDLibrary {
                 "The current song does not have album information.",
             ))
         })?;
-        let playlist = self.playlist_from_songs_album(&current_album, number_albums)?;
+        let songs = self.get_stored_songs()?;
+        let mut current_album_songs = songs
+            .iter()
+            .filter_map(|s| {
+                if s.album == Some(current_album.to_owned()) {
+                    Some(s.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        current_album_songs.sort_by(|s1, s2| {
+            let track_number1 = s1
+                .track_number
+                .to_owned()
+                .unwrap_or_else(|| String::from(""));
+            let track_number2 = s2
+                .track_number
+                .to_owned()
+                .unwrap_or_else(|| String::from(""));
+            if let Ok(x) = track_number1.parse::<i32>() {
+                if let Ok(y) = track_number2.parse::<i32>() {
+                    return x.cmp(&y);
+                }
+            }
+            s1.track_number.cmp(&s2.track_number)
+        });
+        let playlist = closest_album_to_group(current_album_songs, songs)?;
+
+        let mut current_album = Some(current_album);
+        let mut album_count = 0;
+        let mut index = 0;
+        for song in playlist.iter() {
+            index += 1;
+            if song.album != current_album {
+                album_count += 1;
+                if album_count > number_albums {
+                    break;
+                }
+                current_album = song.album.to_owned();
+            }
+        }
+        let playlist = &playlist[..index];
 
         let current_pos = mpd_song.place.unwrap().pos;
         mpd_conn.delete(0..current_pos)?;
@@ -406,7 +449,7 @@ impl MPDLibrary {
         &self,
         number_songs: usize,
         distance: G,
-        sort: F,
+        mut sort: F,
         dedup: bool,
     ) -> Result<()>
     where
@@ -423,8 +466,9 @@ impl MPDLibrary {
         let current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
             "No song is currently playing. Add a song to start the playlist from, and try again."
         })?;
-        let mut playlist =
-            self.playlist_from_song_custom(current_song, number_songs, distance, sort)?;
+        let mut playlist = self.get_stored_songs()?;
+        sort(&current_song, &mut playlist, distance);
+        let mut playlist = playlist.into_iter().take(number_songs).collect::<Vec<_>>();
 
         if dedup {
             dedup_playlist_custom_distance(&mut playlist, None, distance);
@@ -442,6 +486,223 @@ impl MPDLibrary {
             };
             mpd_conn.push(mpd_song)?;
         }
+        Ok(())
+    }
+
+    /// Get songs stored in the SQLite database.
+    ///
+    /// One could also imagine storing songs in a plain JSONlines
+    /// or something similar.
+    fn get_stored_songs(&self) -> BlissResult<Vec<Song>> {
+        let sqlite_conn = self.sqlite_conn.lock().unwrap();
+        let mut stmt = sqlite_conn
+            .prepare(
+                "
+                select
+                    song.path, feature, album, track_number, title,
+                    artist, genre, version from feature
+                    inner join song on song.id = feature.song_id
+                    where song.analyzed = true order by path;
+                ",
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        let results = stmt
+            .query_map(
+                [],
+                |row| -> Result<
+                    (String, f32, String, String, String, String, String, u16),
+                    RusqliteError,
+                > {
+                    let path = row.get(0)?;
+                    let feature = row.get(1)?;
+                    let album = row.get(2).unwrap_or_else(|_| String::from(""));
+                    let track_number = row.get(3).unwrap_or_else(|_| String::from(""));
+                    let title = row.get(4).unwrap_or_else(|_| String::from(""));
+                    let artist = row.get(5).unwrap_or_else(|_| String::from(""));
+                    let genre = row.get(6).unwrap_or_else(|_| String::from(""));
+                    let version = row.get(7).unwrap_or(1);
+                    Ok((
+                        path,
+                        feature,
+                        album,
+                        track_number,
+                        title,
+                        artist,
+                        genre,
+                        version,
+                    ))
+                },
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+
+        let mut songs_hashmap = HashMap::new();
+        for result in results {
+            let result = result.map_err(|e| BlissError::ProviderError(e.to_string()))?;
+            let song_entry = songs_hashmap.entry(result.0.to_owned()).or_insert_with(|| {
+                (
+                    vec![],
+                    result.2.to_owned(),
+                    result.3.to_owned(),
+                    result.4.to_owned(),
+                    result.5.to_owned(),
+                    result.6.to_owned(),
+                    result.7,
+                )
+            });
+            song_entry.0.push(result.1);
+        }
+        songs_hashmap
+            .into_iter()
+            .map(
+                |(path, (analysis, album, track_number, title, artist, genre, version))| {
+                    let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
+                        BlissError::ProviderError(
+                            "Too many or too little features were provided at the end of \
+                        the analysis. You might be using an older version of blissify \
+                        with a newer bliss."
+                                .to_string(),
+                        )
+                    })?;
+                    let genre = if genre.is_empty() { None } else { Some(genre) };
+                    let track_number = if track_number.is_empty() {
+                        None
+                    } else {
+                        Some(track_number)
+                    };
+                    let album = if album.is_empty() { None } else { Some(album) };
+                    let artist = if artist.is_empty() {
+                        None
+                    } else {
+                        Some(artist)
+                    };
+                    let title = if title.is_empty() { None } else { Some(title) };
+                    Ok(Song {
+                        path: PathBuf::from(&path),
+                        analysis: Analysis::new(array),
+                        track_number,
+                        album,
+                        title,
+                        artist,
+                        genre,
+                        features_version: version,
+                        ..Default::default()
+                    })
+                },
+            )
+            .collect::<BlissResult<Vec<Song>>>()
+    }
+
+    /// Get the song's paths from the MPD database.
+    ///
+    /// Note: this uses [mpd_base_path](MPDLibrary::mpd_base_path) because MPD
+    /// returns paths without including MPD_BASE_PATH.
+    fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
+        let mut mpd_conn = self.mpd_conn.lock().unwrap();
+        Ok(mpd_conn
+            .list(&Term::File, &Query::default())
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?
+            .iter()
+            .map(|x| {
+                String::from(
+                    Path::new(&self.mpd_base_path)
+                        .join(Path::new(x))
+                        .to_str()
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<String>>())
+    }
+
+    /// Store a given [Song](Song) into the SQLite database.
+    fn store_song(&mut self, song: &Song) -> Result<(), BlissError> {
+        let mut sqlite_conn = self.sqlite_conn.lock().unwrap();
+        let path = Path::new(&song.path)
+            .strip_prefix(&self.mpd_base_path)
+            .unwrap();
+        sqlite_conn
+            .execute(
+                "
+            insert into song (
+                path, artist, title, album,
+                track_number, genre, analyzed, version
+            )
+            values (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
+            )
+            on conflict(path)
+            do update set
+                artist=excluded.artist,
+                title=excluded.title,
+                album=excluded.album,
+                track_number=excluded.track_number,
+                genre=excluded.genre,
+                analyzed=excluded.analyzed,
+                version=excluded.version
+            ",
+                params![
+                    path.to_str(),
+                    song.artist,
+                    song.title,
+                    song.album,
+                    song.track_number,
+                    song.genre,
+                    true,
+                    song.features_version,
+                ],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        let last_song_id: i64 = sqlite_conn
+            .query_row(
+                "select id from song where path = ?1",
+                params![path.to_str()],
+                |row| row.get(0),
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        sqlite_conn
+            .execute(
+                "delete from feature where song_id = ?1",
+                params![last_song_id],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+
+        let tx = sqlite_conn
+            .transaction()
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        for (index, feature) in song.analysis.as_vec().iter().enumerate() {
+            tx.execute(
+                "
+                insert into feature (song_id, feature, feature_index)
+                values (?1, ?2, ?3)
+                ",
+                params![last_song_id, feature, index],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        }
+        tx.commit()
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Store an errored [Song](Song) in the SQLite database.
+    ///
+    /// Note that it currently doesn't store the actual error; it just stores
+    /// the song and sets `analyzed` to `false`.
+    fn store_error_song(&mut self, song_path: String, e: BlissError) -> BlissResult<()> {
+        let path = song_path.strip_prefix(&self.mpd_base_path.to_str().unwrap());
+        self.sqlite_conn
+            .lock()
+            .unwrap()
+            .execute(
+                "
+            insert or ignore into song(path) values (?1)
+            ",
+                [path],
+            )
+            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+        error!(
+            "Analysis of song '{}' failed: {} The error has been stored.",
+            song_path, e
+        );
         Ok(())
     }
 
@@ -591,224 +852,6 @@ impl MPDLibrary {
             current_song = next_song.unwrap();
             write!(stdout, "{}", termion::clear::All).unwrap();
         }
-        Ok(())
-    }
-}
-
-impl Library for MPDLibrary {
-    /// Get songs stored in the SQLite database.
-    ///
-    /// One could also imagine storing songs in a plain JSONlines
-    /// or something similar.
-    fn get_stored_songs(&self) -> BlissResult<Vec<Song>> {
-        let sqlite_conn = self.sqlite_conn.lock().unwrap();
-        let mut stmt = sqlite_conn
-            .prepare(
-                "
-                select
-                    song.path, feature, album, track_number, title,
-                    artist, genre, version from feature
-                    inner join song on song.id = feature.song_id
-                    where song.analyzed = true order by path;
-                ",
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        let results = stmt
-            .query_map(
-                [],
-                |row| -> Result<
-                    (String, f32, String, String, String, String, String, u16),
-                    RusqliteError,
-                > {
-                    let path = row.get(0)?;
-                    let feature = row.get(1)?;
-                    let album = row.get(2).unwrap_or_else(|_| String::from(""));
-                    let track_number = row.get(3).unwrap_or_else(|_| String::from(""));
-                    let title = row.get(4).unwrap_or_else(|_| String::from(""));
-                    let artist = row.get(5).unwrap_or_else(|_| String::from(""));
-                    let genre = row.get(6).unwrap_or_else(|_| String::from(""));
-                    let version = row.get(7).unwrap_or(1);
-                    Ok((
-                        path,
-                        feature,
-                        album,
-                        track_number,
-                        title,
-                        artist,
-                        genre,
-                        version,
-                    ))
-                },
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-
-        let mut songs_hashmap = HashMap::new();
-        for result in results {
-            let result = result.map_err(|e| BlissError::ProviderError(e.to_string()))?;
-            let song_entry = songs_hashmap.entry(result.0.to_owned()).or_insert_with(|| {
-                (
-                    vec![],
-                    result.2.to_owned(),
-                    result.3.to_owned(),
-                    result.4.to_owned(),
-                    result.5.to_owned(),
-                    result.6.to_owned(),
-                    result.7,
-                )
-            });
-            song_entry.0.push(result.1);
-        }
-        songs_hashmap
-            .into_iter()
-            .map(
-                |(path, (analysis, album, track_number, title, artist, genre, version))| {
-                    let array: [f32; NUMBER_FEATURES] = analysis.try_into().map_err(|_| {
-                        BlissError::ProviderError(
-                            "Too many or too little features were provided at the end of \
-                        the analysis. You might be using an older version of blissify \
-                        with a newer bliss."
-                                .to_string(),
-                        )
-                    })?;
-                    let genre = if genre.is_empty() { None } else { Some(genre) };
-                    let track_number = if track_number.is_empty() {
-                        None
-                    } else {
-                        Some(track_number)
-                    };
-                    let album = if album.is_empty() { None } else { Some(album) };
-                    let artist = if artist.is_empty() {
-                        None
-                    } else {
-                        Some(artist)
-                    };
-                    let title = if title.is_empty() { None } else { Some(title) };
-                    Ok(Song {
-                        path: PathBuf::from(&path),
-                        analysis: Analysis::new(array),
-                        track_number,
-                        album,
-                        title,
-                        artist,
-                        genre,
-                        features_version: version,
-                    })
-                },
-            )
-            .collect::<BlissResult<Vec<Song>>>()
-    }
-
-    /// Get the song's paths from the MPD database.
-    ///
-    /// Note: this uses [mpd_base_path](MPDLibrary::mpd_base_path) because MPD
-    /// returns paths without including MPD_BASE_PATH.
-    fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
-        let mut mpd_conn = self.mpd_conn.lock().unwrap();
-        Ok(mpd_conn
-            .list(&Term::File, &Query::default())
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?
-            .iter()
-            .map(|x| {
-                String::from(
-                    Path::new(&self.mpd_base_path)
-                        .join(Path::new(x))
-                        .to_str()
-                        .unwrap(),
-                )
-            })
-            .collect::<Vec<String>>())
-    }
-
-    /// Store a given [Song](Song) into the SQLite database.
-    fn store_song(&mut self, song: &Song) -> Result<(), BlissError> {
-        let mut sqlite_conn = self.sqlite_conn.lock().unwrap();
-        let path = Path::new(&song.path)
-            .strip_prefix(&self.mpd_base_path)
-            .unwrap();
-        sqlite_conn
-            .execute(
-                "
-            insert into song (
-                path, artist, title, album,
-                track_number, genre, analyzed, version
-            )
-            values (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
-            )
-            on conflict(path)
-            do update set
-                artist=excluded.artist,
-                title=excluded.title,
-                album=excluded.album,
-                track_number=excluded.track_number,
-                genre=excluded.genre,
-                analyzed=excluded.analyzed,
-                version=excluded.version
-            ",
-                params![
-                    path.to_str(),
-                    song.artist,
-                    song.title,
-                    song.album,
-                    song.track_number,
-                    song.genre,
-                    true,
-                    song.features_version,
-                ],
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        let last_song_id: i64 = sqlite_conn
-            .query_row(
-                "select id from song where path = ?1",
-                params![path.to_str()],
-                |row| row.get(0),
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        sqlite_conn
-            .execute(
-                "delete from feature where song_id = ?1",
-                params![last_song_id],
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-
-        let tx = sqlite_conn
-            .transaction()
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        for (index, feature) in song.analysis.as_vec().iter().enumerate() {
-            tx.execute(
-                "
-                insert into feature (song_id, feature, feature_index)
-                values (?1, ?2, ?3)
-                ",
-                params![last_song_id, feature, index],
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        }
-        tx.commit()
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        Ok(())
-    }
-
-    /// Store an errored [Song](Song) in the SQLite database.
-    ///
-    /// Note that it currently doesn't store the actual error; it just stores
-    /// the song and sets `analyzed` to `false`.
-    fn store_error_song(&mut self, song_path: String, e: BlissError) -> BlissResult<()> {
-        let path = song_path.strip_prefix(&self.mpd_base_path.to_str().unwrap());
-        self.sqlite_conn
-            .lock()
-            .unwrap()
-            .execute(
-                "
-            insert or ignore into song(path) values (?1)
-            ",
-                [path],
-            )
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?;
-        error!(
-            "Analysis of song '{}' failed: {} The error has been stored.",
-            song_path, e
-        );
         Ok(())
     }
 }
