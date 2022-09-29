@@ -1,5 +1,9 @@
 # Changelog
 
+## blissify 3.0
+* Use the Library struct.
+* Make CUE sheets work.
+
 ## blissify 0.2.7
 * Add an option to make an interactive playlist.
 * Store bliss' features version in the database and use it.
