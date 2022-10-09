@@ -1,6 +1,9 @@
 # Changelog
 
-## blissify 3.0
+## blissify 0.3.1
+* Add a `number-cores` option.
+
+## blissify 0.3.0
 * Use the Library struct.
 * Make CUE sheets work.
 
