@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::char;
 #[cfg(not(test))]
 use std::env;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -62,8 +63,9 @@ impl Config {
         mpd_base_path: PathBuf,
         config_path: Option<PathBuf>,
         database_path: Option<PathBuf>,
+        number_cores: Option<NonZeroUsize>,
     ) -> Result<Self> {
-        let base_config = BaseConfig::new(config_path, database_path)?;
+        let base_config = BaseConfig::new(config_path, database_path, number_cores)?;
         Ok(Self {
             base_config,
             mpd_base_path,
@@ -184,8 +186,9 @@ impl MPDLibrary {
         mpd_base_path: PathBuf,
         config_path: Option<PathBuf>,
         database_path: Option<PathBuf>,
+        number_cores: Option<NonZeroUsize>,
     ) -> Result<Self> {
-        let config = Config::new(mpd_base_path, config_path, database_path)?;
+        let config = Config::new(mpd_base_path, config_path, database_path, number_cores)?;
         let library = Library::new(config)?;
         let mpd_library = MPDLibrary {
             library,
@@ -529,13 +532,40 @@ fn main() -> Result<()> {
                 .required(false)
                 .takes_value(true)
             )
+            .arg(Arg::with_name("number-cores")
+                .long("number-cores")
+                .help(
+                    "Number of CPU cores the analysis should use \
+                    (defaults to the number of cores the CPU has).
+                    Useful to avoid a too heavy load on a machine.")
+                .required(false)
+                .takes_value(true)
+            )
         )
         .subcommand(
             SubCommand::with_name("rescan")
+            .arg(Arg::with_name("number-cores")
+                .long("number-cores")
+                .help(
+                    "Number of CPU cores the analysis should use \
+                    (defaults to the number of cores the CPU has).
+                    Useful to avoid a too heavy load on a machine.")
+                .required(false)
+                .takes_value(true)
+            )
             .about("(Re)scan completely an MPD library")
         )
         .subcommand(
             SubCommand::with_name("update")
+            .arg(Arg::with_name("number-cores")
+                .long("number-cores")
+                .help(
+                    "Number of CPU cores the analysis should use \
+                    (defaults to the number of cores the CPU has).
+                    Useful to avoid a too heavy load on a machine.")
+                .required(false)
+                .takes_value(true)
+            )
             .about("Scan new songs that were added to the MPD library since last scan.")
         )
         .subcommand(
@@ -626,15 +656,49 @@ fn main() -> Result<()> {
         }
     } else if let Some(sub_m) = matches.subcommand_matches("init") {
         let database_path = matches.value_of("database-path").map(PathBuf::from);
+        let number_cores = matches
+            .value_of("number-cores")
+            .map(|x| x.parse::<NonZeroUsize>())
+            .map_or(Ok(None), |r| r.map(Some))
+            .map_err(|_| {
+                BlissError::ProviderError(String::from("Number of cores must be positive"))
+            })?;
         let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
-        let mut library = MPDLibrary::new(PathBuf::from(base_path), config_path, database_path)?;
+        let mut library = MPDLibrary::new(
+            PathBuf::from(base_path),
+            config_path,
+            database_path,
+            number_cores,
+        )?;
 
         library.full_rescan()?;
-    } else if matches.subcommand_matches("rescan").is_some() {
+    } else if let Some(sub_m) = matches.subcommand_matches("rescan") {
         let mut library = MPDLibrary::from_config_path(config_path)?;
+        let number_cores = sub_m
+            .value_of("number-cores")
+            .map(|x| x.parse::<NonZeroUsize>())
+            .map_or(Ok(None), |r| r.map(Some))
+            .map_err(|_| {
+                BlissError::ProviderError(String::from("Number of cores must be positive"))
+            })?;
+
+        if let Some(cores) = number_cores {
+            library.library.config.set_number_cores(cores)?;
+        };
         library.full_rescan()?;
-    } else if matches.subcommand_matches("update").is_some() {
+    } else if let Some(sub_m) = matches.subcommand_matches("update") {
         let mut library = MPDLibrary::from_config_path(config_path)?;
+        let number_cores = sub_m
+            .value_of("number-cores")
+            .map(|x| x.parse::<NonZeroUsize>())
+            .map_or(Ok(None), |r| r.map(Some))
+            .map_err(|_| {
+                BlissError::ProviderError(String::from("Number of cores must be positive"))
+            })?;
+
+        if let Some(cores) = number_cores {
+            library.library.config.set_number_cores(cores)?;
+        };
         let paths = library.get_songs_paths()?;
         library.library.update_library(paths, true)?;
     } else if let Some(sub_m) = matches.subcommand_matches("playlist") {
@@ -764,8 +828,13 @@ mod test {
         let config_dir = TempDir::new("coucou").unwrap();
         let config_file = config_dir.path().join("config.json");
         let database_file = config_dir.path().join("bliss.db");
-        let library =
-            MPDLibrary::new("path".into(), Some(config_file), Some(database_file)).unwrap();
+        let library = MPDLibrary::new(
+            "path".into(),
+            Some(config_file),
+            Some(database_file),
+            Some(NonZeroUsize::new(1).unwrap()),
+        )
+        .unwrap();
         (library, config_dir)
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "blissify"
-version = "0.3.0"
+version = "0.3.2"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2018"
 license = "GPL-3.0-only"
@@ -15,7 +15,7 @@ readme = "README.md"
 default = ["bliss-audio/library"]
 
 [dependencies]
-bliss-audio = "0.6.2"
+bliss-audio = "0.6.4"
 mpd = "0.0.12"
 dirs = "3.0.1"
 tempdir = "0.3.7"
