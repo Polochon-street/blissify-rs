@@ -43,18 +43,23 @@ it if MPD is listening to somewhere else than `127.0.0.1:6600` (the default).
 
 ## Analyze a library
 
-To analyze your MPD library, use
+To initalize and analyze your MPD library, use
 ```
-$ blissify update /path/to/mpd/root
+$ blissify init /path/to/mpd/root
 ```
 
 Note that it may take several minutes (up to some hours, on very large
 libraries with more than for instance 20k songs) to complete.
 
-If something goes wrong during the analysis, and the database enters an
+You can further update your library by running
+``` 
+$ blissify update
+```
+
+If something goes wrong and the database enters an
 unstable state, you can use
 ```
-$ blissify rescan /path/to/mpd/root
+$ blissify rescan
 ```
 to remove the existing database and rescan all files.
 
