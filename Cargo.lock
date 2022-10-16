@@ -88,6 +88,8 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 [[package]]
 name = "bliss-audio"
 version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613c60447405cd2639c1525fddcdf259b99dfa2e083178b4594ad15db78b50cf"
 dependencies = [
  "anyhow",
  "bliss-audio-aubio-rs",
