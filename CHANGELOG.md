@@ -1,6 +1,6 @@
 # Changelog
 
-## blissify 0.3.2
+## blissify 0.3.3
 * Bump bliss to pretty-print json.
 * Complete README.
 * Fix the init option on `number-cores`.
