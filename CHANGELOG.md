@@ -1,5 +1,9 @@
 # Changelog
 
+## blissify 0.3.2
+* Complete README.
+* Fix the init option on `number-cores`.
+
 ## blissify 0.3.1
 * Add a `number-cores` option.
 
