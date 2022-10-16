@@ -655,8 +655,8 @@ fn main() -> Result<()> {
             }
         }
     } else if let Some(sub_m) = matches.subcommand_matches("init") {
-        let database_path = matches.value_of("database-path").map(PathBuf::from);
-        let number_cores = matches
+        let database_path = sub_m.value_of("database-path").map(PathBuf::from);
+        let number_cores = sub_m
             .value_of("number-cores")
             .map(|x| x.parse::<NonZeroUsize>())
             .map_or(Ok(None), |r| r.map(Some))
