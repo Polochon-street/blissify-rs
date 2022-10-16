@@ -13,7 +13,7 @@ use bliss_audio::playlist::{
     DistanceMetric,
 };
 use bliss_audio::{BlissError, BlissResult, Song};
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, ArgMatches, SubCommand};
 #[cfg(not(test))]
 use log::warn;
 use mpd::search::{Query, Term};
@@ -490,6 +490,14 @@ impl MPDLibrary {
     }
 }
 
+fn parse_number_cores(matches: &ArgMatches) -> Result<Option<NonZeroUsize>, BlissError> {
+    matches
+        .value_of("number-cores")
+        .map(|x| x.parse::<NonZeroUsize>())
+        .map_or(Ok(None), |r| r.map(Some))
+        .map_err(|_| BlissError::ProviderError(String::from("Number of cores must be positive")))
+}
+
 fn main() -> Result<()> {
     env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "warn"));
 
@@ -656,13 +664,7 @@ fn main() -> Result<()> {
         }
     } else if let Some(sub_m) = matches.subcommand_matches("init") {
         let database_path = sub_m.value_of("database-path").map(PathBuf::from);
-        let number_cores = sub_m
-            .value_of("number-cores")
-            .map(|x| x.parse::<NonZeroUsize>())
-            .map_or(Ok(None), |r| r.map(Some))
-            .map_err(|_| {
-                BlissError::ProviderError(String::from("Number of cores must be positive"))
-            })?;
+        let number_cores = parse_number_cores(sub_m)?;
         let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
         let mut library = MPDLibrary::new(
             PathBuf::from(base_path),
@@ -674,27 +676,14 @@ fn main() -> Result<()> {
         library.full_rescan()?;
     } else if let Some(sub_m) = matches.subcommand_matches("rescan") {
         let mut library = MPDLibrary::from_config_path(config_path)?;
-        let number_cores = sub_m
-            .value_of("number-cores")
-            .map(|x| x.parse::<NonZeroUsize>())
-            .map_or(Ok(None), |r| r.map(Some))
-            .map_err(|_| {
-                BlissError::ProviderError(String::from("Number of cores must be positive"))
-            })?;
-
+        let number_cores = parse_number_cores(sub_m)?;
         if let Some(cores) = number_cores {
             library.library.config.set_number_cores(cores)?;
         };
         library.full_rescan()?;
     } else if let Some(sub_m) = matches.subcommand_matches("update") {
         let mut library = MPDLibrary::from_config_path(config_path)?;
-        let number_cores = sub_m
-            .value_of("number-cores")
-            .map(|x| x.parse::<NonZeroUsize>())
-            .map_or(Ok(None), |r| r.map(Some))
-            .map_err(|_| {
-                BlissError::ProviderError(String::from("Number of cores must be positive"))
-            })?;
+        let number_cores = parse_number_cores(sub_m)?;
 
         if let Some(cores) = number_cores {
             library.library.config.set_number_cores(cores)?;
