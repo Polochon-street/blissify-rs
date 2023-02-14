@@ -1,5 +1,11 @@
 # Changelog
 
+## blissify 0.3.4
+* Bump bliss so updating the database also deletes old song.
+  This fixes a bug that would make incomplete playlists when trying to queue
+  songs that existed in the database, but no longer in the MPD server.
+* Use Rust 2021
+
 ## blissify 0.3.3
 * Bump bliss to pretty-print json.
 * Complete README.
