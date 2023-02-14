@@ -1,8 +1,8 @@
 [package]
 name = "blissify"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
-edition = "2018"
+edition = "2021"
 license = "GPL-3.0-only"
 description = "An MPD plugin for creating smart playlists"
 repository = "https://github.com/Polochon-street/blissify-rs"
@@ -15,7 +15,7 @@ readme = "README.md"
 default = ["bliss-audio/library"]
 
 [dependencies]
-bliss-audio = "0.6.5"
+bliss-audio = "0.6.6"
 mpd = "0.0.12"
 dirs = "3.0.1"
 tempdir = "0.3.7"

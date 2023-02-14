@@ -283,13 +283,12 @@ impl MPDLibrary {
         let path = self.mpd_to_bliss_path(&mpd_song)?;
 
         let playlist = self.library.playlist_from_custom(
-            &path.to_string_lossy().to_owned(),
+            &path.to_string_lossy().clone(),
             number_songs,
             distance,
             sort_by,
             dedup,
         )?;
-
         let current_pos = mpd_song.place.unwrap().pos;
         mpd_conn.delete(0..current_pos)?;
         if mpd_conn.queue()?.len() > 1 {
@@ -689,7 +688,7 @@ fn main() -> Result<()> {
             library.library.config.set_number_cores(cores)?;
         };
         let paths = library.get_songs_paths()?;
-        library.library.update_library(paths, true)?;
+        library.library.update_library(paths, true, true)?;
     } else if let Some(sub_m) = matches.subcommand_matches("playlist") {
         let number_songs = match sub_m.value_of("PLAYLIST_LENGTH").unwrap().parse::<usize>() {
             Err(_) => {
@@ -1194,7 +1193,7 @@ mod test {
         }
 
         let paths = library.get_songs_paths().unwrap();
-        library.library.update_library(paths, true).unwrap();
+        library.library.update_library(paths, true, true).unwrap();
 
         let sqlite_conn = library.library.sqlite_conn.lock().unwrap();
         let mut stmt = sqlite_conn
@@ -1283,7 +1282,7 @@ mod test {
         }
 
         let paths = library.get_songs_paths().unwrap();
-        library.library.update_library(paths, true).unwrap();
+        library.library.update_library(paths, true, true).unwrap();
 
         let sqlite_conn = library.library.sqlite_conn.lock().unwrap();
         let mut stmt = sqlite_conn
