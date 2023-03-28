@@ -1,5 +1,11 @@
 # Changelog
 
+## blissify 0.3.5
+* Bump bliss to ensure ffmpeg 6.0 compatibility.
+* Rewrite the connectivity code so that MPD_HOST / MPD_PORT work with passwords and
+  sockets, in accordance with
+  https://mpd.readthedocs.io/en/latest/client.html#connecting-to-mpd.
+
 ## blissify 0.3.4
 * Bump bliss so updating the database also deletes old song.
   This fixes a bug that would make incomplete playlists when trying to queue

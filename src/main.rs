@@ -25,12 +25,16 @@ use serde::{Deserialize, Serialize};
 use std::char;
 #[cfg(not(test))]
 use std::env;
+#[cfg(not(test))]
+use std::net::TcpStream;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use std::io;
 use std::io::Write;
+#[cfg(not(test))]
+use std::{io::Read, net::SocketAddr, os::unix::net::UnixStream};
 
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
@@ -43,7 +47,7 @@ struct MPDLibrary {
     /// A connection to the MPD server, used for retrieving song's paths,
     /// currently played songs, and queue tracks.
     #[cfg(not(test))]
-    pub mpd_conn: Arc<Mutex<Client>>,
+    pub mpd_conn: Arc<Mutex<Client<MPDStream>>>,
     /// A mock MPDClient, used for testing purposes only.
     #[cfg(test)]
     pub mpd_conn: Arc<Mutex<MockMPDClient>>,
@@ -90,16 +94,53 @@ pub struct MockMPDClient {
     mpd_queue: Vec<MPDSong>,
 }
 
+#[cfg(not(test))]
+enum MPDStream {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+#[cfg(not(test))]
+impl Read for MPDStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            MPDStream::Tcp(v) => v.read(buf),
+            MPDStream::Unix(v) => v.read(buf),
+        }
+    }
+}
+#[cfg(not(test))]
+impl Write for MPDStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            MPDStream::Tcp(v) => v.write(buf),
+            MPDStream::Unix(v) => v.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            MPDStream::Tcp(v) => v.flush(),
+            MPDStream::Unix(v) => v.flush(),
+        }
+    }
+}
+
 impl MPDLibrary {
     /// Get a connection to the MPD database given some environment
     /// variables.
     #[cfg(not(test))]
-    fn get_mpd_conn() -> Result<Client> {
-        let mpd_host = match env::var("MPD_HOST") {
-            Ok(h) => h,
+    fn get_mpd_conn() -> Result<Client<MPDStream>> {
+        use std::net::IpAddr;
+
+        let (password, mpd_host) = match env::var("MPD_HOST") {
+            Ok(h) => match h.rsplit_once('@') {
+                None => (None, h),
+                Some((password, host)) => (Some(password.to_owned()), host.to_owned()),
+            },
             Err(_) => {
-                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1.");
-                String::from("127.0.0.1")
+                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1:6600.");
+                (None, String::from("127.0.0.1"))
             }
         };
         let mpd_port = match env::var("MPD_PORT") {
@@ -111,7 +152,27 @@ impl MPDLibrary {
                 6600
             }
         };
-        Ok(Client::connect((mpd_host.as_str(), mpd_port))?)
+        let addr: Option<SocketAddr> = {
+            let tentative_parse: Option<SocketAddr> = mpd_host.parse().ok();
+            if tentative_parse.is_none() {
+                let tentative_parse = mpd_host.parse::<IpAddr>().ok();
+                tentative_parse.map(|ip| (ip, mpd_port).into())
+            } else {
+                tentative_parse
+            }
+        };
+
+        let mut client = {
+            if let Some(address) = addr {
+                Client::new(MPDStream::Tcp(TcpStream::connect(address)?))?
+            } else {
+                Client::new(MPDStream::Unix(UnixStream::connect(mpd_host)?))?
+            }
+        };
+        if let Some(pw) = password {
+            client.login(&pw)?;
+        }
+        Ok(client)
     }
 
     fn mpd_to_bliss_path(&self, mpd_song: &MPDSong) -> Result<PathBuf> {
