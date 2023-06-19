@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.3.6
+* Bump bliss to get rpi feature.
+
 ## blissify 0.3.5
 * Bump bliss to ensure ffmpeg 6.0 compatibility.
 * Rewrite the connectivity code so that MPD_HOST / MPD_PORT work with passwords and
