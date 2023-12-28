@@ -1,6 +1,6 @@
 [package]
 name = "blissify"
-version = "0.3.6"
+version = "0.3.7"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2021"
 license = "GPL-3.0-only"
@@ -17,7 +17,7 @@ default = ["bliss-audio/library"]
 rpi = ["bliss-audio/rpi"]
 
 [dependencies]
-bliss-audio = "0.6.9"
+bliss-audio = "0.6.10"
 mpd = "0.0.12"
 dirs = "3.0.1"
 tempdir = "0.3.7"
