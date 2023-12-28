@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.3.7
+* Bump bliss to get new ffmpeg version and utf-8 fix.
+
 ## blissify 0.3.6
 * Bump bliss to get rpi feature.
 
