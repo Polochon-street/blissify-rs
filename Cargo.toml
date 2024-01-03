@@ -1,6 +1,6 @@
 [package]
 name = "blissify"
-version = "0.3.7"
+version = "0.3.8"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2021"
 license = "GPL-3.0-only"
