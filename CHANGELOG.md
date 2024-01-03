@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.3.8
+* Bump bliss to fix build on raspberry pis.
+
 ## blissify 0.3.7
 * Bump bliss to get new ffmpeg version and utf-8 fix.
 

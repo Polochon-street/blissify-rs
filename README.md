@@ -36,6 +36,10 @@ On Archlinux:
 
 Finally, use `cargo install blissify` to install it.
 
+Note: if you are using a raspberry pi and its corresponding ffmpeg
+(i.e. `ffmpeg -version|grep rpi` gives back something), use
+`cargo install --features=rpi blissify` instead.
+
 
 All the commands below read the `MPD_HOST` and `MPD_PORT` environment
 variables and try to reach MPD using that. You might want to change
