@@ -28,7 +28,7 @@ headers) to install it, as well as a
 
 On Debian-based systems:
 
-    apt install -y clang libavcodec-dev libavformat-dev libavutil-dev pkg-config
+    apt install -y clang libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libavdevice-dev libsqlite3-dev pkg-config
 
 On Archlinux:
 
