@@ -44,11 +44,11 @@ Note: if you are using a raspberry pi and its corresponding ffmpeg
 All the commands below read the `MPD_HOST` and `MPD_PORT` environment
 variables and try to reach MPD using that. You might want to change
 it if MPD is listening to somewhere else than `127.0.0.1:6600` (the default).
-It should be fully compatible with [the MPD documentation](https://mpd.readthedocs.io/en/latest/client.html#connecting-to-mpd.)
+It should be fully compatible with [the MPD documentation](https://mpd.readthedocs.io/en/latest/client.html#connecting-to-mpd).
 
 ## Analyze a library
 
-To initalize and analyze your MPD library, use
+To initialize and analyze your MPD library, use
 ```
 $ blissify init /path/to/mpd/root
 ```
@@ -69,7 +69,7 @@ $ blissify rescan
 to remove the existing database and rescan all files.
 
 If you want to see if the analysis has been successful, or simply want to see
-the current files in, you can use
+the current files in the database, you can use
 ```
 $ blissify list-db
 ```
@@ -112,9 +112,9 @@ $ blissify playlist --seed-song 30
 
 ### Make an album playlist
 
-You can also make a playlist of album that sound like the current album
-your listening to (more specifically, the album of the current song you're
-playling, regardless of whether you queued the full album or not).
+You can also make a playlist of albums that sound like the current album
+you're listening to (more specifically, the album of the current song you're
+playing, regardless of whether you queued the full album or not).
 
 To try it out:
 ```
@@ -124,7 +124,7 @@ $ blissify playlist --album-playlist 30
 ### Make an interactive playlist
 
 Interactive playlists start from a song, and let you choose which song should
-be played next among the 3 closest songs (the number of songs displayed is
+be played next among the 3 closest songs (the number of songs displayed
 can be set manually):
 
 ```
