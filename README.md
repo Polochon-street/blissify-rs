@@ -128,7 +128,7 @@ be played next among the 3 closest songs (the number of songs displayed
 can be set manually):
 
 ```
-$ blissify playlist --interactive-playlist --number-choices 5
+$ blissify interactive-playlist --number-choices 5
 ```
 
 By default, it crops the current playlist to just keep the currently played
@@ -136,7 +136,7 @@ song. If you want to just start from the last song and continue from there, use
 `--continue`:
 
 ```
-$ blissify playlist --interactive-playlist --number-choices 5 --continue
+$ blissify interactive-playlist --number-choices 5 --continue
 ```
 
 # Details
