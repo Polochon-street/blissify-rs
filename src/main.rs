@@ -139,7 +139,7 @@ impl MPDLibrary {
                 Some((password, host)) => (Some(password.to_owned()), host.to_owned()),
             },
             Err(_) => {
-                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1:6600.");
+                warn!("Could not find any MPD_HOST environment variable set. Defaulting to 127.0.0.1.");
                 (None, String::from("127.0.0.1"))
             }
         };
