@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::io;
 use std::io::Write;
 #[cfg(not(test))]
-use std::{io::Read, net::SocketAddr, os::unix::net::UnixStream};
+use std::{io::Read, os::unix::net::UnixStream};
 
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
@@ -131,11 +131,14 @@ impl MPDLibrary {
     /// variables.
     #[cfg(not(test))]
     fn get_mpd_conn() -> Result<Client<MPDStream>> {
-        use std::net::IpAddr;
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::SocketAddr;
 
         let (password, mpd_host) = match env::var("MPD_HOST") {
-            Ok(h) => match h.rsplit_once('@') {
+            Ok(h) => match h.split_once('@') {
                 None => (None, h),
+                // If it's a unix abstract socket, there will be nothing before the '@'
+                Some(("", _)) => (None, h),
                 Some((password, host)) => (Some(password.to_owned()), host.to_owned()),
             },
             Err(_) => {
@@ -152,21 +155,23 @@ impl MPDLibrary {
                 6600
             }
         };
-        let addr: Option<SocketAddr> = {
-            let tentative_parse: Option<SocketAddr> = mpd_host.parse().ok();
-            if tentative_parse.is_none() {
-                let tentative_parse = mpd_host.parse::<IpAddr>().ok();
-                tentative_parse.map(|ip| (ip, mpd_port).into())
-            } else {
-                tentative_parse
-            }
-        };
 
         let mut client = {
-            if let Some(address) = addr {
-                Client::new(MPDStream::Tcp(TcpStream::connect(address)?))?
-            } else {
+            // TODO It is most likely a socket if it starts by "/", but maybe not necessarily?
+            // find a solution that doesn't depend on a url crate that pulls the entire internet
+            // with it
+            if mpd_host.starts_with('/') || mpd_host.starts_with('~') {
                 Client::new(MPDStream::Unix(UnixStream::connect(mpd_host)?))?
+            } else if mpd_host.starts_with('@') {
+                let addr = SocketAddr::from_abstract_name(mpd_host.split_once('@').unwrap().1)?;
+                Client::new(MPDStream::Unix(UnixStream::connect_addr(&addr)?))?
+            }
+            // It is a hostname or an IP address
+            else {
+                Client::new(MPDStream::Tcp(TcpStream::connect(format!(
+                    "{}:{}",
+                    mpd_host, mpd_port
+                ))?))?
             }
         };
         if let Some(pw) = password {
