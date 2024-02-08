@@ -131,6 +131,7 @@ impl MPDLibrary {
     /// variables.
     #[cfg(not(test))]
     fn get_mpd_conn() -> Result<Client<MPDStream>> {
+        #[cfg(target_os = "linux")]
         use std::os::linux::net::SocketAddrExt;
         use std::os::unix::net::SocketAddr;
 
@@ -161,18 +162,22 @@ impl MPDLibrary {
             // find a solution that doesn't depend on a url crate that pulls the entire internet
             // with it
             if mpd_host.starts_with('/') || mpd_host.starts_with('~') {
-                Client::new(MPDStream::Unix(UnixStream::connect(mpd_host)?))?
-            } else if mpd_host.starts_with('@') {
+                return Ok(Client::new(MPDStream::Unix(UnixStream::connect(
+                    mpd_host,
+                )?))?);
+            }
+            #[cfg(target_os = "linux")]
+            if mpd_host.starts_with('@') {
                 let addr = SocketAddr::from_abstract_name(mpd_host.split_once('@').unwrap().1)?;
-                Client::new(MPDStream::Unix(UnixStream::connect_addr(&addr)?))?
+                return Ok(Client::new(MPDStream::Unix(UnixStream::connect_addr(
+                    &addr,
+                )?))?);
             }
             // It is a hostname or an IP address
-            else {
-                Client::new(MPDStream::Tcp(TcpStream::connect(format!(
-                    "{}:{}",
-                    mpd_host, mpd_port
-                ))?))?
-            }
+            Client::new(MPDStream::Tcp(TcpStream::connect(format!(
+                "{}:{}",
+                mpd_host, mpd_port
+            ))?))?
         };
         if let Some(pw) = password {
             client.login(&pw)?;
