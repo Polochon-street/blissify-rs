@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.3.10
+* Fix compilation for non-linux OSes
+
 ## blissify 0.3.9
 * Add support for hostnames and abstract sockets in MPD_HOST
 
