@@ -9,11 +9,11 @@
 use anyhow::{bail, Context, Result};
 use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong};
 use bliss_audio::playlist::{
-    closest_to_first_song_by_key, cosine_distance, euclidean_distance, song_to_song_by_key,
-    DistanceMetric,
+    closest_to_songs, cosine_distance, euclidean_distance, song_to_song, DistanceMetricBuilder,
 };
-use bliss_audio::{BlissError, BlissResult, Song};
+use bliss_audio::{BlissError, BlissResult};
 use clap::{App, Arg, ArgMatches, SubCommand};
+use extended_isolation_forest::ForestOptions;
 #[cfg(not(test))]
 use log::warn;
 use mpd::search::{Query, Term};
@@ -334,42 +334,45 @@ impl MPDLibrary {
         Ok(())
     }
 
-    fn queue_from_current_song_custom<F, G>(
+    // Make a playlist from the current playlist
+    fn queue_from_current_playlist<F>(
         &self,
         number_songs: usize,
-        distance: G,
-        sort_by: F,
+        distance: &dyn DistanceMetricBuilder,
+        sort_by: &mut F,
         dedup: bool,
+        current_song_only: bool,
     ) -> Result<()>
     where
-        F: FnMut(&LibrarySong<()>, &mut Vec<LibrarySong<()>>, G, fn(&LibrarySong<()>) -> Song),
-        G: DistanceMetric + Copy,
+        F: FnMut(&[LibrarySong<()>], &mut [LibrarySong<()>], &dyn DistanceMetricBuilder),
     {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         mpd_conn.random(false)?;
-        let mpd_song = match mpd_conn.currentsong()? {
-            Some(s) => s,
-            None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
+        let songs = if current_song_only {
+            match mpd_conn.currentsong()? {
+                Some(s) => vec![s],
+                None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
+            }
+        } else {
+            mpd_conn.queue()?
         };
-        let path = self.mpd_to_bliss_path(&mpd_song)?;
-
-        let playlist = self.library.playlist_from_custom(
-            &path.to_string_lossy().clone(),
-            number_songs,
-            distance,
-            sort_by,
-            dedup,
-        )?;
-        let current_pos = mpd_song.place.unwrap().pos;
-        mpd_conn.delete(0..current_pos)?;
-        if mpd_conn.queue()?.len() > 1 {
-            mpd_conn.delete(1..)?;
-        }
-
-        for song in &playlist[1..] {
+        let paths = songs
+            .iter()
+            .map(|s| self.mpd_to_bliss_path(&s))
+            .collect::<Result<Vec<_>, _>>()?;
+        let paths = paths
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>();
+        let paths = paths.iter().map(|s| &**s).collect::<Vec<&str>>();
+        let playlist =
+            self.library
+                .playlist_from_custom(&paths, number_songs, distance, sort_by, dedup)?;
+        for song in &playlist {
             let mpd_song = self.bliss_song_to_mpd(song)?;
             mpd_conn.push(mpd_song)?;
         }
+
         Ok(())
     }
 
@@ -500,8 +503,11 @@ impl MPDLibrary {
                         .join("\n")
                 );
             }
-            songs
-                .sort_by_cached_key(|song| n32(current_song.bliss_song.distance(&song.bliss_song)));
+            let distance =
+                (&euclidean_distance).build(&[current_song.bliss_song.analysis.as_arr1()]);
+            songs.sort_by_cached_key(|song| {
+                n32(distance.distance(&song.bliss_song.analysis.as_arr1()))
+            });
             // TODO put a proper dedup here
             //dedup_playlist(&mut songs, None);
             for (i, song) in songs[1..number_choices + 1].iter().enumerate() {
@@ -657,19 +663,23 @@ fn main() -> Result<()> {
                 .long("distance")
                 .value_name("distance metric")
                 .help(
-                    "Choose the distance metric used to make the playlist. Default is 'euclidean',\
-                    other option is 'cosine'"
+                    "Choose the distance metric used to make the playlist. Default is 'extended_isolation_forest',\
+                    other options are 'cosine', and 'euclidean'"
                 )
-                .default_value("euclidean")
+                .default_value("extended_isolation_forest")
             )
-            .arg(Arg::with_name("seed")
-                .long("seed-song")
+            .arg(Arg::with_name("sort")
+                .long("sort")
+                .value_name("sort function")
                 .help(
-                    "Instead of making a playlist of only the closest song to the current song,\
-                    make a playlist that queues the closest song to the first song, then
-                    the closest to the second song, etc. Can take some time to build."
+                    "Choose the way the playlist will be sorted. Default is 'closest_to_songs',\
+                    which will sort songs by their distance to the current queue/or current song,\
+                    in descending order. The alternative is song_to_song, which will first select\
+                    the closest match. The second song will be the closest song to the first\
+                    selection, etc., so that each song is as close as possible to the previous\
+                    song. Can take some time to build."
                 )
-                .takes_value(false)
+                .takes_value(true)
             )
             .arg(Arg::with_name("dedup")
                 .long("deduplicate-songs")
@@ -682,6 +692,11 @@ fn main() -> Result<()> {
             .arg(Arg::with_name("album")
                 .long("album-playlist")
                 .help("Make a playlist of similar albums from the current album.")
+                .takes_value(false)
+            )
+            .arg(Arg::with_name("from-current-song")
+                .long("from-current-song")
+                .help("Base the playlist on the currenty playing song, ignoring the rest of the queue.")
                 .takes_value(false)
             )
         )
@@ -772,35 +787,29 @@ fn main() -> Result<()> {
         if sub_m.is_present("album") {
             library.queue_from_current_album(number_songs)?;
         } else {
-            let distance_metric = if let Some(m) = sub_m.value_of("distance") {
-                match m {
-                    "euclidean" => euclidean_distance,
-                    "cosine" => cosine_distance,
-                    _ => bail!("Please choose a distance name, between 'euclidean' and 'cosine'."),
-                }
-            } else {
-                euclidean_distance
+            let mut sort = match sub_m.value_of("sort") {
+                Some("song_to_song") => song_to_song,
+                Some("closest_to_songs") => closest_to_songs,
+                Some(_) => bail!(
+                    "Please choose a sort function from 'song_to_song' and 'closest_to_songs'"
+                ),
+                None => closest_to_songs,
             };
 
-            let sort = match sub_m.is_present("seed") {
-                false => closest_to_first_song_by_key,
-                true => song_to_song_by_key,
+            let default_forest_options = ForestOptions::default();
+            let distance: &dyn DistanceMetricBuilder = match sub_m.value_of("distance") {
+                Some("extended_isolation_forest") | None => &default_forest_options,
+            Some("euclidean_distance") => &euclidean_distance,
+            Some("cosine_distance") => &cosine_distance,
+            Some(_) => bail!("Please choose a distance name, between 'extended_isolation_forest', 'euclidean' and 'cosine'.")
             };
-            if sub_m.is_present("dedup") {
-                library.queue_from_current_song_custom(
-                    number_songs,
-                    distance_metric,
-                    sort,
-                    true,
-                )?;
-            } else {
-                library.queue_from_current_song_custom(
-                    number_songs,
-                    distance_metric,
-                    sort,
-                    false,
-                )?;
-            }
+            library.queue_from_current_playlist(
+                number_songs,
+                distance,
+                &mut sort,
+                sub_m.is_present("dedup"),
+                sub_m.is_present("from-current-song"),
+            )?;
         }
     } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
         let number_choices: usize = sub_m.value_of("choices").unwrap_or("3").parse()?;
@@ -992,7 +1001,7 @@ mod test {
                 .unwrap();
         }
         assert_eq!(
-            library.queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song_by_key, true).unwrap_err().to_string(),
+            library.queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song, true).unwrap_err().to_string(),
             String::from("No song is currently playing. Add a song to start the playlist from, and try again."),
         );
     }
@@ -1032,7 +1041,7 @@ mod test {
                 .queue_from_current_song_custom(
                     20,
                     euclidean_distance,
-                    closest_to_first_song_by_key,
+                    closest_to_first_song,
                     true
                 )
                 .unwrap_err()
@@ -1155,12 +1164,7 @@ mod test {
                 .unwrap();
         }
         library
-            .queue_from_current_song_custom(
-                20,
-                euclidean_distance,
-                closest_to_first_song_by_key,
-                false,
-            )
+            .queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song, false)
             .unwrap();
 
         let playlist = library

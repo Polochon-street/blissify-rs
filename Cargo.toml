@@ -17,7 +17,7 @@ default = ["bliss-audio/library"]
 rpi = ["bliss-audio/rpi"]
 
 [dependencies]
-bliss-audio = "0.6.11"
+bliss-audio = { "git"="https://github.com/SimonTeixidor/bliss-rs.git", branch="multi-track-playlist-source" }
 mpd = "0.0.12"
 dirs = "3.0.1"
 tempdir = "0.3.7"
@@ -30,3 +30,4 @@ noisy_float = "0.2.0"
 termion = "1.5.6"
 serde = "1.0"
 pretty_assertions = "1.2.1"
+extended-isolation-forest = "0.2.3"
