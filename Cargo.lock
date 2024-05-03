@@ -102,13 +102,12 @@ checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
 [[package]]
 name = "bliss-audio"
 version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7554b018920fa4216ee13d67e5dbc9a1ac2fc745e22001e38f8d30d81bea33"
 dependencies = [
  "adler32",
  "anyhow",
  "bliss-audio-aubio-rs",
  "dirs 5.0.1",
+ "extended-isolation-forest",
  "ffmpeg-next",
  "ffmpeg-sys-next",
  "indicatif 0.17.7",
@@ -155,6 +154,7 @@ dependencies = [
  "clap",
  "dirs 3.0.2",
  "env_logger",
+ "extended-isolation-forest",
  "indicatif 0.16.2",
  "log",
  "mpd",
@@ -336,6 +336,18 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "extended-isolation-forest"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5193a74618ae2f7ea9c7feda2772192e0e3c04d9cbd2beb5ee9b0916d7eb3f"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
+ "rand_distr",
+ "serde",
 ]
 
 [[package]]
@@ -547,6 +559,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
+
+[[package]]
 name = "libredox"
 version = "0.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -680,6 +698,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39e3200413f237f41ab11ad6d161bc7239c84dcb631773ccd7de3dfe4b5c267c"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -833,6 +852,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32cb0b9bc82b0a0876c2dd994a7e7a2683d3e7390ca40e6886785ef0c7e3ee31"
+dependencies = [
+ "num-traits",
+ "rand 0.8.5",
 ]
 
 [[package]]
