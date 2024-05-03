@@ -187,7 +187,7 @@ impl MPDLibrary {
 
     fn mpd_to_bliss_path(&self, mpd_song: &MPDSong) -> Result<PathBuf> {
         let file = &mpd_song.file;
-        let path = if file.to_lowercase().contains(".cue/track") {
+        let path = if file.to_lowercase().contains(".cue/track") || file.to_lowercase().contains(".flac/track") {
             let lowercase_string = file.to_lowercase();
             let idx: Vec<_> = lowercase_string.match_indices("/track").collect();
             let beginning_file = file.split_at(idx[0].0).0.to_owned();
@@ -579,8 +579,7 @@ fn main() -> Result<()> {
              .short("c")
              .long("config-path")
             .help(
-                "Optional argument specifying the configuration path, for both loading \
-                and initializing blissify. Example: \"/path/to/config.json\".",
+                "Optional argument specifying the configuration path, for both loading and initializing blissify. Example: \"/path/to/config.json\".",
             )
             .required(false)
             .takes_value(true)
@@ -604,8 +603,7 @@ fn main() -> Result<()> {
                 .short("d")
                 .long("database-path")
                 .help(
-                    "Optional argument specifying where to store the database
-                    containing analyzed songs. Example: \"/path/to/bliss.db\"",
+                    "Optional argument specifying where to store the database containing analyzed songs. Example: \"/path/to/bliss.db\"",
                 )
                 .required(false)
                 .takes_value(true)
@@ -613,9 +611,8 @@ fn main() -> Result<()> {
             .arg(Arg::with_name("number-cores")
                 .long("number-cores")
                 .help(
-                    "Number of CPU cores the analysis should use \
-                    (defaults to the number of cores the CPU has).
-                    Useful to avoid a too heavy load on a machine.")
+                    "Number of CPU cores the analysis should use (defaults to the number of cores the CPU has).
+Useful to avoid a too heavy load on a machine.")
                 .required(false)
                 .takes_value(true)
             )
@@ -625,9 +622,8 @@ fn main() -> Result<()> {
             .arg(Arg::with_name("number-cores")
                 .long("number-cores")
                 .help(
-                    "Number of CPU cores the analysis should use \
-                    (defaults to the number of cores the CPU has).
-                    Useful to avoid a too heavy load on a machine.")
+                    "Number of CPU cores the analysis should use (defaults to the number of cores the CPU has).
+Useful to avoid a too heavy load on a machine.")
                 .required(false)
                 .takes_value(true)
             )
@@ -638,9 +634,8 @@ fn main() -> Result<()> {
             .arg(Arg::with_name("number-cores")
                 .long("number-cores")
                 .help(
-                    "Number of CPU cores the analysis should use \
-                    (defaults to the number of cores the CPU has).
-                    Useful to avoid a too heavy load on a machine.")
+                    "Number of CPU cores the analysis should use (defaults to the number of cores the CPU has).
+Useful to avoid a too heavy load on a machine.")
                 .required(false)
                 .takes_value(true)
             )
@@ -657,7 +652,7 @@ fn main() -> Result<()> {
                 .long("distance")
                 .value_name("distance metric")
                 .help(
-                    "Choose the distance metric used to make the playlist. Default is 'euclidean',\
+                    "Choose the distance metric used to make the playlist. Default is 'euclidean',
                     other option is 'cosine'"
                 )
                 .default_value("euclidean")
@@ -665,17 +660,14 @@ fn main() -> Result<()> {
             .arg(Arg::with_name("seed")
                 .long("seed-song")
                 .help(
-                    "Instead of making a playlist of only the closest song to the current song,\
-                    make a playlist that queues the closest song to the first song, then
-                    the closest to the second song, etc. Can take some time to build."
+                    "Instead of making a playlist of only the closest song to the current song, make a playlist that queues the closest song to the first song, then the closest to the second song, etc. Can take some time to build."
                 )
                 .takes_value(false)
             )
             .arg(Arg::with_name("dedup")
                 .long("deduplicate-songs")
                 .help(
-                    "Deduplicate songs based both on the title / artist and their\
-                     sheer proximity."
+                    "Deduplicate songs based both on the title / artist and their sheer proximity."
                 )
                 .takes_value(false)
             )
@@ -688,23 +680,20 @@ fn main() -> Result<()> {
         .subcommand(
             SubCommand::with_name("interactive-playlist")
             .about(
-                "Make a playlist, prompting a set of close songs, \
-                and asking which one will be the most appropriate."
+                "Make a playlist, prompting a set of close songs, and asking which one will be the most appropriate."
             )
             .arg(Arg::with_name("continue")
                 .long("continue")
                 .help(
-                    "Take the current playlist's last song as a starting \
-                    point, instead of removing the current playlist and \
-                    starting from the first song."
+                    "Take the current playlist's last song as a starting point, instead of removing the current playlist and starting from the first song."
                 )
             )
             .arg(Arg::with_name("choices")
                 .long("number-choices")
                 .value_name("choices")
                 .help(
-                    "Choose the number of proposed items you get each time. \
-                    Defaults to 3, cannot be more than 9."
+                    "Choose the number of proposed items you get each time.
+Defaults to 3, cannot be more than 9."
                 )
                 .default_value("3")
             )
