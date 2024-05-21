@@ -9,10 +9,9 @@
 use anyhow::{bail, Context, Result};
 use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong};
 use bliss_audio::playlist::{
-    closest_to_first_song_by_key, cosine_distance, euclidean_distance, song_to_song_by_key,
-    DistanceMetric,
+    closest_to_songs, cosine_distance, euclidean_distance, song_to_song, DistanceMetricBuilder,
 };
-use bliss_audio::{BlissError, BlissResult, Song};
+use bliss_audio::{BlissError, BlissResult};
 use clap::{App, Arg, ArgMatches, SubCommand};
 #[cfg(not(test))]
 use log::warn;
@@ -39,11 +38,13 @@ use std::{io::Read, os::unix::net::UnixStream};
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
+use bliss_audio::decoder::ffmpeg::FFmpeg as Decoder;
+
 /// The main struct that stores both the Library object, and some other
 /// helper functions to make everything work properly.
 struct MPDLibrary {
     // A library object, containing database-related objects.
-    pub library: Library<Config>,
+    pub library: Library<Config, Decoder>,
     /// A connection to the MPD server, used for retrieving song's paths,
     /// currently played songs, and queue tracks.
     #[cfg(not(test))]
@@ -334,16 +335,15 @@ impl MPDLibrary {
         Ok(())
     }
 
-    fn queue_from_current_song_custom<F, G>(
+    fn queue_from_current_song_custom<F>(
         &self,
         number_songs: usize,
-        distance: G,
-        sort_by: F,
+        distance: &dyn DistanceMetricBuilder,
+        mut sort_by: F,
         dedup: bool,
     ) -> Result<()>
     where
-        F: FnMut(&LibrarySong<()>, &mut Vec<LibrarySong<()>>, G, fn(&LibrarySong<()>) -> Song),
-        G: DistanceMetric + Copy,
+        F: FnMut(&[LibrarySong<()>], &mut [LibrarySong<()>], &dyn DistanceMetricBuilder),
     {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         mpd_conn.random(false)?;
@@ -354,10 +354,10 @@ impl MPDLibrary {
         let path = self.mpd_to_bliss_path(&mpd_song)?;
 
         let playlist = self.library.playlist_from_custom(
-            &path.to_string_lossy().clone(),
+            &[&path.to_string_lossy().clone()],
             number_songs,
             distance,
-            sort_by,
+            &mut sort_by,
             dedup,
         )?;
         let current_pos = mpd_song.place.unwrap().pos;
@@ -500,8 +500,12 @@ impl MPDLibrary {
                         .join("\n")
                 );
             }
-            songs
-                .sort_by_cached_key(|song| n32(current_song.bliss_song.distance(&song.bliss_song)));
+            songs.sort_by_cached_key(|song| {
+                n32(euclidean_distance(
+                    &current_song.bliss_song.analysis.as_arr1(),
+                    &song.bliss_song.analysis.as_arr1(),
+                ))
+            });
             // TODO put a proper dedup here
             //dedup_playlist(&mut songs, None);
             for (i, song) in songs[1..number_choices + 1].iter().enumerate() {
@@ -783,20 +787,20 @@ fn main() -> Result<()> {
             };
 
             let sort = match sub_m.is_present("seed") {
-                false => closest_to_first_song_by_key,
-                true => song_to_song_by_key,
+                false => closest_to_songs,
+                true => song_to_song,
             };
             if sub_m.is_present("dedup") {
                 library.queue_from_current_song_custom(
                     number_songs,
-                    distance_metric,
+                    &distance_metric,
                     sort,
                     true,
                 )?;
             } else {
                 library.queue_from_current_song_custom(
                     number_songs,
-                    distance_metric,
+                    &distance_metric,
                     sort,
                     false,
                 )?;
@@ -818,7 +822,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use bliss_audio::Analysis;
+    use bliss_audio::{Analysis, Song};
     use mpd::error::Result;
     use mpd::song::{Id, QueuePlace, Song as MPDSong};
     use pretty_assertions::assert_eq;
@@ -992,7 +996,7 @@ mod test {
                 .unwrap();
         }
         assert_eq!(
-            library.queue_from_current_song_custom(20, euclidean_distance, closest_to_first_song_by_key, true).unwrap_err().to_string(),
+            library.queue_from_current_song_custom(20, &euclidean_distance, closest_to_songs, true).unwrap_err().to_string(),
             String::from("No song is currently playing. Add a song to start the playlist from, and try again."),
         );
     }
@@ -1031,8 +1035,8 @@ mod test {
             library
                 .queue_from_current_song_custom(
                     20,
-                    euclidean_distance,
-                    closest_to_first_song_by_key,
+                    &euclidean_distance,
+                    closest_to_songs,
                     true
                 )
                 .unwrap_err()
@@ -1155,12 +1159,7 @@ mod test {
                 .unwrap();
         }
         library
-            .queue_from_current_song_custom(
-                20,
-                euclidean_distance,
-                closest_to_first_song_by_key,
-                false,
-            )
+            .queue_from_current_song_custom(20, &euclidean_distance, closest_to_songs, false)
             .unwrap();
 
         let playlist = library

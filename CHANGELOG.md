@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.3.11
+* Bump bliss version
+
 ## blissify 0.3.10
 * Fix compilation for non-linux OSes
 
