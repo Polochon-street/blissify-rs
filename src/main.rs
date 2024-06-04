@@ -15,7 +15,7 @@ use bliss_audio::{BlissError, BlissResult};
 use clap::{App, Arg, ArgMatches, SubCommand};
 #[cfg(not(test))]
 use log::warn;
-use mpd::search::{Query, Term};
+use mpd::search::{Query, Term, Window};
 use mpd::song::Song as MPDSong;
 #[cfg(not(test))]
 use mpd::Client;
@@ -93,6 +93,11 @@ impl AppConfigTrait for Config {
 /// Convenience Mock for testing.
 pub struct MockMPDClient {
     mpd_queue: Vec<MPDSong>,
+    // FIXME only useful because the Window struct
+    // https://docs.rs/mpd/latest/mpd/search/struct.Window.html
+    // is still work in progress, remove when the corresponding
+    // fields can be accessed.
+    search_window: u32,
 }
 
 #[cfg(not(test))]
@@ -188,7 +193,9 @@ impl MPDLibrary {
 
     fn mpd_to_bliss_path(&self, mpd_song: &MPDSong) -> Result<PathBuf> {
         let file = &mpd_song.file;
-        let path = if file.to_lowercase().contains(".cue/track") || file.to_lowercase().contains(".flac/track") {
+        let path = if file.to_lowercase().contains(".cue/track")
+            || file.to_lowercase().contains(".flac/track")
+        {
             let lowercase_string = file.to_lowercase();
             let idx: Vec<_> = lowercase_string.match_indices("/track").collect();
             let beginning_file = file.split_at(idx[0].0).0.to_owned();
@@ -383,30 +390,45 @@ impl MPDLibrary {
     fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
 
-        let mut files = mpd_conn
-            .list(&Term::File, &Query::default())
-            .map_err(|e| BlissError::ProviderError(e.to_string()))?
-            .into_iter()
-            .map(|s| {
-                if s.to_lowercase().contains(".cue/track") {
-                    let lowercase_string = s.to_lowercase();
-                    let idx: Vec<_> = lowercase_string.match_indices("/track").collect();
-                    s.split_at(idx[0].0).0.to_owned()
-                } else {
-                    s
-                }
-            })
-            .map(|s| {
-                String::from(
-                    Path::new(&self.library.config.mpd_base_path)
-                        .join(Path::new(&s))
-                        .to_str()
-                        .unwrap(),
-                )
-            })
-            .collect::<Vec<String>>();
+        let mut query = Query::new();
+        let query = query.and(Term::File, "");
+        let (mut index, chunk_size) = (0, 10_000);
+        let mut files = vec![];
+        loop {
+            let search = mpd_conn
+                .search(query, Window::from((index, index + chunk_size)))
+                .map_err(|e| BlissError::ProviderError(e.to_string()))?;
+            if search.is_empty() {
+                break;
+            }
+            files.extend(
+                search
+                    .into_iter()
+                    .map(|s| s.file.to_owned())
+                    .map(|s| {
+                        if s.to_lowercase().contains(".cue/track") {
+                            let lowercase_string = s.to_lowercase();
+                            let idx: Vec<_> = lowercase_string.match_indices("/track").collect();
+                            s.split_at(idx[0].0).0.to_owned()
+                        } else {
+                            s
+                        }
+                    })
+                    .map(|s| {
+                        String::from(
+                            Path::new(&self.library.config.mpd_base_path)
+                                .join(Path::new(&s))
+                                .to_str()
+                                .unwrap(),
+                        )
+                    })
+                    .collect::<Vec<String>>(),
+            );
+            index += chunk_size;
+        }
         files.sort();
         files.dedup();
+
         Ok(files)
     }
 
@@ -822,7 +844,10 @@ mod test {
     impl MockMPDClient {
         pub fn connect(address: &str) -> Result<Self> {
             assert_eq!(address, "127.0.0.1:6600");
-            Ok(Self { mpd_queue: vec![] })
+            Ok(Self {
+                mpd_queue: vec![],
+                search_window: 0,
+            })
         }
 
         pub fn currentsong(&mut self) -> Result<Option<MPDSong>> {
@@ -832,12 +857,24 @@ mod test {
             }
         }
 
-        pub fn list(&mut self, term: &Term, _: &Query) -> Result<Vec<String>> {
-            assert!(matches!(term, Term::File));
+        pub fn search(&mut self, _: &Query, _: Window) -> Result<Vec<MPDSong>> {
+            if self.search_window >= 1 {
+                return Ok(vec![]);
+            }
+            self.search_window += 1;
             Ok(vec![
-                String::from("s16_mono_22_5kHz.flac"),
-                String::from("s16_stereo_22_5kHz.flac"),
-                String::from("foo"),
+                MPDSong {
+                    file: String::from("s16_mono_22_5kHz.flac"),
+                    ..Default::default()
+                },
+                MPDSong {
+                    file: String::from("s16_stereo_22_5kHz.flac"),
+                    ..Default::default()
+                },
+                MPDSong {
+                    file: String::from("foo"),
+                    ..Default::default()
+                },
             ])
         }
 

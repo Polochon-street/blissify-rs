@@ -1,13 +1,16 @@
 # Changelog
 
+## blissify 0.3.12
+* Use window / offset to read the list of MPD files to avoid timeout errors.
+
 ## blissify 0.3.11
-* Bump bliss version
+* Bump bliss version.
 
 ## blissify 0.3.10
-* Fix compilation for non-linux OSes
+* Fix compilation for non-linux OSes.
 
 ## blissify 0.3.9
-* Add support for hostnames and abstract sockets in MPD_HOST
+* Add support for hostnames and abstract sockets in MPD_HOST.
 
 ## blissify 0.3.8
 * Bump bliss to fix build on raspberry pis.

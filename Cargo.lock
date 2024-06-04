@@ -101,7 +101,9 @@ checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 
 [[package]]
 name = "bliss-audio"
-version = "0.7.0"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bfd556b69b31eeeecc5a52bc8ff99cf77be170f87495e7b7c8875be92064e54b"
 dependencies = [
  "adler32",
  "anyhow",
@@ -147,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "anyhow",
  "bliss-audio",
@@ -364,9 +366,9 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "ffmpeg-next"
-version = "7.0.1"
+version = "7.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a681d69bf41d1c9edc7c6a2b09b69d0b96e9b916d200b7ec5b10de61f559eb31"
+checksum = "ddfce5242643c8a57b5a44b7e933ccbde85f9508d1379e578e97eee4a9d4334b"
 dependencies = [
  "bitflags 2.5.0",
  "ffmpeg-sys-next",
