@@ -13,7 +13,6 @@ use bliss_audio::playlist::{
 };
 use bliss_audio::{BlissError, BlissResult};
 use clap::{App, Arg, ArgMatches, SubCommand};
-#[cfg(not(test))]
 use log::warn;
 use mpd::search::{Query, Term, Window};
 use mpd::song::Song as MPDSong;
@@ -304,62 +303,183 @@ impl MPDLibrary {
         Ok(())
     }
 
-    /// Make a playlist from the album that's currently playing.
-    fn queue_from_current_album(&self, number_albums: usize) -> Result<()> {
+    /// Make a playlist composed of albums similar to the album that's currently playing,
+    /// and queue them.
+    ///
+    /// # Parameters
+    ///
+    /// - `number_albums`: The number of albums to queue
+    /// - `dry_run`: Do not modify the queue, instead print the files that would
+    ///   be added to the playlist
+    /// - `keep_queue`: if false, will remove the content of the current queue save for the
+    ///   currently playing album, and will queue the playlist after the last song of the
+    ///   current album. If true, will queue the playlist after the last song of the current album,
+    ///   but will keep the queue intact
+    // TODO write tests for keep_queue also
+    fn queue_from_current_album(
+        &self,
+        number_albums: usize,
+        dry_run: bool,
+        keep_queue: bool,
+    ) -> Result<()> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
-        mpd_conn.random(false)?;
+        if mpd_conn.status()?.random {
+            warn!("Random mode is enabled for MPD, you might want to turn it off to get the most out of your playlist.");
+        }
         let mpd_song = match mpd_conn.currentsong()? {
             Some(s) => s,
             None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
         };
 
         let current_song = self.mpd_to_bliss_song(&mpd_song)?.with_context(|| {
-            "No song is currently playing. Add a song to start the playlist from, and try again."
+            "The song currently playing could not be found in blissify's library. Please analyze it, and try again."
         })?;
         let current_album = current_song.bliss_song.album.ok_or_else(|| {
             BlissError::ProviderError(String::from(
-                "The current song does not have album information.",
+                "The current song does not have any album information.",
             ))
         })?;
         let playlist = self
             .library
-            .album_playlist_from::<()>(current_album, number_albums)?;
-        let current_pos = mpd_song.place.unwrap().pos;
-        mpd_conn.delete(0..current_pos)?;
-        if mpd_conn.queue()?.len() > 1 {
-            mpd_conn.delete(1..)?;
+            .album_playlist_from::<()>(current_album.clone(), number_albums)?;
+
+        let current_track_number = if let Some(track_number) = &current_song.bliss_song.track_number
+        {
+            track_number.parse::<usize>().unwrap_or(1)
+        } else {
+            1
+        };
+        // If we don't want to keep the queue, we start the playlist where the
+        // currently playing track is playing, and we won't have any album leftovers to
+        // shift, since we're erasing the current queue and replacing it with our fresh one.
+        let (index, album_leftovers): (usize, usize) = if !keep_queue {
+            (current_track_number, 1)
         }
-        let mut index: usize = 1;
-        if let Some(track_number) = &current_song.bliss_song.track_number {
-            if let Ok(track_number) = track_number.parse::<usize>() {
-                index = track_number;
+        // If we want to keep the queue, we should iterate on the current playlist
+        // until we find the end of the current album, and set the beginning of it there,
+        // since we want to preserve the queue as much as possible.
+        else {
+            let queue_from_current_song = mpd_conn.songs(mpd_song.place.unwrap().pos..)?;
+            let album_leftovers = queue_from_current_song
+                .iter()
+                .take_while(|s| {
+                    for (tagname, value) in s.tags.iter() {
+                        if tagname.to_ascii_lowercase() == String::from("album")
+                            && *value == current_album
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+                .count();
+            let index = playlist
+                .iter()
+                .position(|s| s.bliss_song.album.as_ref() != Some(&current_album))
+                .ok_or(BlissError::ProviderError(String::from(
+                    "Could not find current album in playlist",
+                )))?;
+            (index, album_leftovers)
+        };
+
+        if dry_run {
+            for song in &playlist[index..] {
+                println!("{}", song.bliss_song.path.to_string_lossy());
             }
+            return Ok(());
         }
-        for song in &playlist[index..] {
+
+        let mut current_pos = mpd_song.place.unwrap().pos;
+
+        // Delete everything except the current song if we don't
+        // want to keep the queue.
+        if !keep_queue {
+            mpd_conn.delete(0..current_pos)?;
+            if mpd_conn.queue()?.len() > 1 {
+                mpd_conn.delete(1..)?;
+            }
+            current_pos = 0;
+        }
+        // Add songs to the queue from the built playlist, starting either
+        // from the current song or from the beginning of the next album
+        for (i, song) in playlist[index..].iter().enumerate() {
             let mpd_song = self.bliss_song_to_mpd(song)?;
-            mpd_conn.push(mpd_song)?;
+            mpd_conn.insert(mpd_song, (current_pos + i as u32).try_into()?)?;
         }
+        let new_pos = current_pos + playlist[index..].len() as u32;
+        // Put back the songs from the current album that were shifted around
+        mpd_conn.shift(
+            new_pos..new_pos + album_leftovers as u32,
+            current_pos.try_into()?,
+        )?;
+
         Ok(())
     }
 
-    fn queue_from_current_song_custom<F>(
+    /// Make a playlist composed of songs similar to the song that's currently playing,
+    /// and queue them.
+    ///
+    /// # Parameters
+    ///
+    /// - `song_path`: The path to the song to make a playlist from. Can be either an absolute
+    ///   path, i.e. `/home/user/Music/album/song.flac`, or a path relative to
+    ///   (mpd_base_path)[Config::mpd_base_path], like `album/song.flac`. If not specified,
+    ///   defaults to the currently playing song.
+    /// - `number_songs`: The number of songs to queue
+    /// - `distance`: The distance metric used to compute distances between songs, see the
+    ///   [bliss_audio::playlist] for details on distance metrics
+    /// - `sort_by`: A closure that does the actual sorting of the playlist in place, based on
+    ///   the `distance` metric chosen, see [bliss_audio::playlist::closest_to_songs] for instance
+    ///   for details on sorting algorithms
+    /// - `dedup`: Whether or not to deduplicate same songs from the resulting playlist
+    /// - `dry_run`: Do not modify the queue, instead print the files that would
+    ///   be added to the playlist
+    /// - `keep_queue`: if false, will remove the content of the entire queue save for the
+    ///   currently playing song, and will queue the playlist after it. If true, will queue
+    ///   the playlist after the current song, but will keep the queue intact.
+    // TODO do we want a flag to toggle "random" off automatically here? And a flag to keep /
+    // exclude the current song from the playlist?
+    fn queue_from_song<F>(
         &self,
+        song_path: Option<&str>,
         number_songs: usize,
         distance: &dyn DistanceMetricBuilder,
         mut sort_by: F,
         dedup: bool,
+        dry_run: bool,
+        keep_queue: bool,
     ) -> Result<()>
     where
         F: FnMut(&[LibrarySong<()>], &mut [LibrarySong<()>], &dyn DistanceMetricBuilder),
     {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
-        mpd_conn.random(false)?;
+        if mpd_conn.status()?.random {
+            warn!("Random mode is enabled for MPD, you might want to turn it off to get the most out of your playlist.");
+        }
         let mpd_song = match mpd_conn.currentsong()? {
             Some(s) => s,
             None => bail!("No song is currently playing. Add a song to start the playlist from, and try again."),
         };
-        let path = self.mpd_to_bliss_path(&mpd_song)?;
+        let path = if let Some(path) = song_path {
+            if path.contains(self.library.config.mpd_base_path.to_string_lossy().as_ref()) {
+                PathBuf::from(path)
+            } else {
+                self.library.config.mpd_base_path.join(path)
+            }
+        } else {
+            self.mpd_to_bliss_path(&mpd_song)?
+        };
 
+        // If we specified a song path on the CLI, chances are the song is not already
+        // in the queue (nor anywhere else).
+        // If we didn't, we're using the current_song, and chances are that the song is
+        // already in the queue, so we want to get an extra song there, since the current
+        // song doesn't count.
+        let number_songs = if song_path.is_some() {
+            number_songs
+        } else {
+            number_songs + 1
+        };
         let playlist = self.library.playlist_from_custom(
             &[&path.to_string_lossy().clone()],
             number_songs,
@@ -367,16 +487,43 @@ impl MPDLibrary {
             &mut sort_by,
             dedup,
         )?;
-        let current_pos = mpd_song.place.unwrap().pos;
-        mpd_conn.delete(0..current_pos)?;
-        if mpd_conn.queue()?.len() > 1 {
-            mpd_conn.delete(1..)?;
+
+        if dry_run {
+            for song in &playlist {
+                println!("{}", song.bliss_song.path.to_string_lossy());
+            }
+            return Ok(());
         }
 
-        for song in &playlist[1..] {
-            let mpd_song = self.bliss_song_to_mpd(song)?;
-            mpd_conn.push(mpd_song)?;
+        let mut current_pos = mpd_song.place.unwrap().pos;
+        // Delete everything except the current song if we don't
+        // want to keep the queue.
+        if !keep_queue {
+            mpd_conn.delete(0..current_pos)?;
+            if mpd_conn.queue()?.len() > 1 {
+                mpd_conn.delete(1..)?;
+            }
+            current_pos = 0;
         }
+
+        // If we're starting from a song specified in song_path,
+        // push the playlist straight at the end.
+        if song_path.is_some() {
+            for song in &playlist {
+                let mpd_song = self.bliss_song_to_mpd(song)?;
+                mpd_conn.push(mpd_song)?;
+            }
+            return Ok(());
+        }
+        // Else, do some magic to preserve the queue depending on the
+        // --keep-current-queue argument.
+        for (index, song) in playlist[1..].iter().enumerate() {
+            let mpd_song = self.bliss_song_to_mpd(song)?;
+            mpd_conn.insert(mpd_song, (current_pos + index as u32).try_into()?)?;
+        }
+        let new_pos = current_pos + playlist.len() as u32 - 1;
+        mpd_conn.shift(new_pos..new_pos + 1, current_pos.try_into()?)?;
+
         Ok(())
     }
 
@@ -385,7 +532,7 @@ impl MPDLibrary {
     /// Instead of returning one filename per CUE track (file.cue/track0001,
     /// file2.cue/track0002, etc), returns the CUE sheet itself (file.cue)
     ///
-    /// Note: this uses [mpd_base_path](MPDLibrary::mpd_base_path) because MPD
+    /// Note: this uses [mpd_base_path](Config::mpd_base_path) because MPD
     /// returns paths without including MPD_BASE_PATH.
     fn get_songs_paths(&self) -> BlissResult<Vec<String>> {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
@@ -669,7 +816,7 @@ Useful to avoid a too heavy load on a machine.")
         )
         .subcommand(
             SubCommand::with_name("playlist")
-            .about("Erase the current playlist and make playlist of PLAYLIST_LENGTH from the currently played song")
+            .about("Erase the current playlist and make playlist of PLAYLIST_LENGTH from the currently played song. Since the song is playing, it will not be added again to the playlist.")
             .arg(Arg::with_name("PLAYLIST_LENGTH")
                 .help("Number of items to queue, including the first song.")
                 .required(true)
@@ -683,6 +830,11 @@ Useful to avoid a too heavy load on a machine.")
                 )
                 .default_value("euclidean")
             )
+            .arg(Arg::with_name("from-song")
+                .long("from-song")
+                .value_name("song path")
+                .help("Instead of making a playlist from the current playing song, make a playlist from 'song path', and add the corresponding songs to the queue. This will also add the song in 'song path' to the playlist.")
+            )
             .arg(Arg::with_name("seed")
                 .long("seed-song")
                 .help(
@@ -694,6 +846,20 @@ Useful to avoid a too heavy load on a machine.")
                 .long("no-deduplication")
                 .help(
                     "Do not deduplicate songs based both on the title / artist and their sheer proximity."
+                )
+                .takes_value(false)
+            )
+            .arg(Arg::with_name("keep-queue")
+                .long("keep-current-queue")
+                .help(
+                    "Instead of removing the rest of the queue and only keeping the selecting song, queuing songs similiar to the selected song, keep the queue the same, and add similar songs right after the selected song, preserving the rest of the queue."
+                )
+                .takes_value(false)
+            )
+            .arg(Arg::with_name("dry-run")
+                .long("dry-run")
+                .help(
+                    "Doesn't actually make any changes to the playlist, but just print songs that would have been added on stdout."
                 )
                 .takes_value(false)
             )
@@ -784,8 +950,12 @@ Defaults to 3, cannot be more than 9."
         };
 
         let library = MPDLibrary::from_config_path(config_path)?;
+        let dry_run = sub_m.is_present("dry-run");
+        let no_dedup = sub_m.is_present("no-dedup");
+        let keep_queue = sub_m.is_present("keep-queue");
+
         if sub_m.is_present("album") {
-            library.queue_from_current_album(number_songs)?;
+            library.queue_from_current_album(number_songs, dry_run, keep_queue)?;
         } else {
             let distance_metric = if let Some(m) = sub_m.value_of("distance") {
                 match m {
@@ -801,12 +971,14 @@ Defaults to 3, cannot be more than 9."
                 false => closest_to_songs,
                 true => song_to_song,
             };
-            let no_dedup = sub_m.is_present("no-dedup");
-            library.queue_from_current_song_custom(
+            library.queue_from_song(
+                sub_m.value_of("from-song"),
                 number_songs,
                 &distance_metric,
                 sort,
                 !no_dedup,
+                dry_run,
+                keep_queue,
             )?;
         }
     } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
@@ -828,6 +1000,7 @@ mod test {
     use bliss_audio::{Analysis, Song};
     use mpd::error::Result;
     use mpd::song::{Id, QueuePlace, Song as MPDSong};
+    use mpd::Status;
     use pretty_assertions::assert_eq;
     use std::ops;
     use std::time::Duration;
@@ -849,6 +1022,13 @@ mod test {
             }
         }
 
+        pub fn songs(&mut self, pos: std::ops::RangeFrom<u32>) -> Result<Vec<MPDSong>> {
+            let range = std::ops::RangeFrom {
+                start: pos.start as usize,
+            };
+            Ok(self.mpd_queue[range].to_vec())
+        }
+
         pub fn search(&mut self, _: &Query, _: Window) -> Result<Vec<MPDSong>> {
             if self.search_window >= 1 {
                 return Ok(vec![]);
@@ -868,6 +1048,17 @@ mod test {
                     ..Default::default()
                 },
             ])
+        }
+
+        pub fn insert(&mut self, song: MPDSong, pos: usize) -> Result<usize> {
+            self.mpd_queue.insert(pos, song);
+            Ok(pos)
+        }
+
+        pub fn shift(&mut self, from: std::ops::Range<u32>, to: usize) -> Result<()> {
+            let value = self.mpd_queue.remove(from.start as usize);
+            self.mpd_queue.insert(to, value);
+            Ok(())
         }
 
         pub fn queue(&mut self) -> Result<Vec<MPDSong>> {
@@ -896,6 +1087,13 @@ mod test {
         pub fn random(&mut self, state: bool) -> Result<()> {
             assert!(!state);
             Ok(())
+        }
+
+        pub fn status(&mut self) -> Result<Status> {
+            Ok(Status {
+                random: false,
+                ..Default::default()
+            })
         }
     }
 
@@ -1014,7 +1212,7 @@ mod test {
                 .unwrap();
         }
         assert_eq!(
-            library.queue_from_current_song_custom(20, &euclidean_distance, closest_to_songs, true).unwrap_err().to_string(),
+            library.queue_from_song(None, 20, &euclidean_distance, closest_to_songs, true, false, false).unwrap_err().to_string(),
             String::from("No song is currently playing. Add a song to start the playlist from, and try again."),
         );
     }
@@ -1051,11 +1249,14 @@ mod test {
 
         assert_eq!(
             library
-                .queue_from_current_song_custom(
+                .queue_from_song(
+                    None,
                     20,
                     &euclidean_distance,
                     closest_to_songs,
-                    true
+                    true,
+                    false,
+                    false,
                 )
                 .unwrap_err()
                 .to_string(),
@@ -1177,7 +1378,15 @@ mod test {
                 .unwrap();
         }
         library
-            .queue_from_current_song_custom(20, &euclidean_distance, closest_to_songs, false)
+            .queue_from_song(
+                None,
+                20,
+                &euclidean_distance,
+                closest_to_songs,
+                false,
+                false,
+                false,
+            )
             .unwrap();
 
         let playlist = library
@@ -1221,7 +1430,7 @@ mod test {
             },
         ];
 
-        library.queue_from_current_album(20).unwrap();
+        library.queue_from_current_album(20, false, false).unwrap();
 
         let playlist = library
             .mpd_conn
