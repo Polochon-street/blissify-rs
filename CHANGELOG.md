@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.4.0
+* Default to deduplicating songs when making playlist; add a "--no-deduplication" option.
+
 ## blissify 0.3.12
 * Use window / offset to read the list of MPD files to avoid timeout errors.
 
