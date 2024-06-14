@@ -690,10 +690,10 @@ Useful to avoid a too heavy load on a machine.")
                 )
                 .takes_value(false)
             )
-            .arg(Arg::with_name("dedup")
-                .long("deduplicate-songs")
+            .arg(Arg::with_name("no-dedup")
+                .long("no-deduplication")
                 .help(
-                    "Deduplicate songs based both on the title / artist and their sheer proximity."
+                    "Do not deduplicate songs based both on the title / artist and their sheer proximity."
                 )
                 .takes_value(false)
             )
@@ -801,21 +801,13 @@ Defaults to 3, cannot be more than 9."
                 false => closest_to_songs,
                 true => song_to_song,
             };
-            if sub_m.is_present("dedup") {
-                library.queue_from_current_song_custom(
-                    number_songs,
-                    &distance_metric,
-                    sort,
-                    true,
-                )?;
-            } else {
-                library.queue_from_current_song_custom(
-                    number_songs,
-                    &distance_metric,
-                    sort,
-                    false,
-                )?;
-            }
+            let no_dedup = sub_m.is_present("no-dedup");
+            library.queue_from_current_song_custom(
+                number_songs,
+                &distance_metric,
+                sort,
+                !no_dedup,
+            )?;
         }
     } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
         let number_choices: usize = sub_m.value_of("choices").unwrap_or("3").parse()?;
