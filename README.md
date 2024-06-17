@@ -83,7 +83,15 @@ $ blissify playlist 100
 ```
 
 This will add 100 songs similar to the song that is currently
-playing on MPD, starting with the closest possible.
+playing on MPD, starting with the closest possible. This will also remove
+all the others songs previously in the queue, leaving only the smart playlist.
+
+If you wish to queue the songs after the current playing song but keep the
+current queue, you can use the `--keep-current-queue` flag, like so:
+
+```
+$ blissify playlist 100 --keep-current-queue
+```
 
 ### Changing the distance metric
 
@@ -94,7 +102,7 @@ To make a playlist with a distance metric different than the default one
 $ blissify playlist --distance <distance_name> 30
 ```
 
-`distance_name` is currently `euclidean` and `cosine`. Don't hesitate to
+`distance_name` can currently be `euclidean` or `cosine`. Don't hesitate to
 experiment with this parameter if the generated playlists are not to your
 linking!
 
@@ -106,6 +114,7 @@ playlist that queues the closest song to the first song, then the closest song
 the second song, etc, effectively making "path" through the songs.
 
 To try it out (it can take a bit more time to build the playlist):
+
 ```
 $ blissify playlist --seed-song 30
 ```
@@ -117,8 +126,16 @@ you're listening to (more specifically, the album of the current song you're
 playing, regardless of whether you queued the full album or not).
 
 To try it out:
+
 ```
 $ blissify playlist --album-playlist 30
+```
+
+If you wish to queue the albums after the current playing album, but keep the
+current queue, you can use the `--keep-current-queue` flag, like so:
+
+```
+$ blissify playlist --album-playlist 100 --keep-current-queue
 ```
 
 ### Make an interactive playlist
@@ -137,6 +154,16 @@ song. If you want to just start from the last song and continue from there, use
 
 ```
 $ blissify interactive-playlist --number-choices 5 --continue
+```
+
+### Dry run mode
+
+If you want to see which playlist blissify would make without changing the
+queue at all, or you wish to plug blissify's output somewhere else, you
+can use the `--dry-run` option, like so:
+
+```
+$ blissify playlist 100 --dry-run
 ```
 
 # Details

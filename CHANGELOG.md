@@ -1,6 +1,11 @@
 # Changelog
 
 ## blissify 0.4.0
+* Add a "--keep-current-queue" flag that keeps the current queue while making playlists,
+  instead of automatically cropping it.
+* Stop automatically disabling random mode, and instead warn the user that random is enabled.
+* Add a "--dry-run" option.
+* Add a "--from-song" option to select a specific song from the command-line.
 * Default to deduplicating songs when making playlist; add a "--no-deduplication" option.
 
 ## blissify 0.3.12
