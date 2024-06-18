@@ -7,8 +7,6 @@
 * Add a "--dry-run" option.
 * Add a "--from-song" option to select a specific song from the command-line.
 * Default to deduplicating songs when making playlist; add a "--no-deduplication" option.
-
-## blissify 0.3.12
 * Use window / offset to read the list of MPD files to avoid timeout errors.
 
 ## blissify 0.3.11
