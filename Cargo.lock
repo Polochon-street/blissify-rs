@@ -101,9 +101,9 @@ checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 
 [[package]]
 name = "bliss-audio"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfd556b69b31eeeecc5a52bc8ff99cf77be170f87495e7b7c8875be92064e54b"
+checksum = "4550feb2d2272cf8fe47d41217ce8f82e17c4d91843a2ee68b79a0b5ac1cc011"
 dependencies = [
  "adler32",
  "anyhow",
@@ -149,7 +149,7 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "bliss-audio",

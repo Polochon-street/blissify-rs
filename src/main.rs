@@ -439,18 +439,19 @@ impl MPDLibrary {
     ///   the playlist after the current song, but will keep the queue intact.
     // TODO do we want a flag to toggle "random" off automatically here? And a flag to keep /
     // exclude the current song from the playlist?
-    fn queue_from_song<F>(
+    fn queue_from_song<'a, F, I>(
         &self,
         song_path: Option<&str>,
         number_songs: usize,
-        distance: &dyn DistanceMetricBuilder,
-        mut sort_by: F,
+        distance: &'a dyn DistanceMetricBuilder,
+        sort_by: F,
         dedup: bool,
         dry_run: bool,
         keep_queue: bool,
     ) -> Result<()>
     where
-        F: FnMut(&[LibrarySong<()>], &mut [LibrarySong<()>], &dyn DistanceMetricBuilder),
+        F: Fn(&[LibrarySong<()>], &[LibrarySong<()>], &'a dyn DistanceMetricBuilder) -> I,
+        I: Iterator<Item = LibrarySong<()>> + 'a,
     {
         let mut mpd_conn = self.mpd_conn.lock().unwrap();
         if mpd_conn.status()?.random {
@@ -480,13 +481,11 @@ impl MPDLibrary {
         } else {
             number_songs + 1
         };
-        let playlist = self.library.playlist_from_custom(
-            &[&path.to_string_lossy().clone()],
-            number_songs,
-            distance,
-            &mut sort_by,
-            dedup,
-        )?;
+        let playlist: Vec<LibrarySong<_>> = self
+            .library
+            .playlist_from_custom(&[&path.to_string_lossy().clone()], distance, sort_by, dedup)?
+            .take(number_songs)
+            .collect();
 
         if dry_run {
             for song in &playlist {
@@ -967,9 +966,14 @@ Defaults to 3, cannot be more than 9."
                 euclidean_distance
             };
 
-            let sort = match sub_m.is_present("seed") {
-                false => closest_to_songs,
-                true => song_to_song,
+            let sort = |x: &[LibrarySong<()>],
+                        y: &[LibrarySong<()>],
+                        z|
+             -> Box<dyn Iterator<Item = LibrarySong<()>>> {
+                match sub_m.is_present("seed") {
+                    false => Box::new(closest_to_songs(x, y, z)),
+                    true => Box::new(song_to_song(x, y, z)),
+                }
             };
             library.queue_from_song(
                 sub_m.value_of("from-song"),
