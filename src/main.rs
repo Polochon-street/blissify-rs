@@ -29,6 +29,8 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use extended_isolation_forest::ForestOptions;
+
 use std::io;
 use std::io::Write;
 #[cfg(not(test))]
@@ -413,6 +415,43 @@ impl MPDLibrary {
             current_pos.try_into()?,
         )?;
 
+        Ok(())
+    }
+
+    fn queue_from_current_playlist<F>(
+        &self,
+        number_songs: usize,
+        distance: &dyn DistanceMetricBuilder,
+        mut sort_by: F,
+        dedup: bool,
+    ) -> Result<()>
+    where
+        F: FnMut(&[LibrarySong<()>], &mut [LibrarySong<()>], &dyn DistanceMetricBuilder),
+    {
+        let mut mpd_conn = self.mpd_conn.lock().unwrap();
+        mpd_conn.random(false)?;
+        let mpd_songs = mpd_conn.queue()?;
+        let paths = mpd_songs
+            .iter()
+            .map(|s| {
+                self.mpd_to_bliss_path(s)
+                    .map(|s| s.to_string_lossy().to_string())
+            })
+            .collect::<Result<Vec<String>, _>>()?;
+        let paths = paths.iter().map(|s| &**s).collect::<Vec<&str>>();
+
+        let playlist = self.library.playlist_from_custom(
+            &paths,
+            number_songs,
+            distance,
+            &mut sort_by,
+            dedup,
+        )?;
+
+        for song in &playlist {
+            let mpd_song = self.bliss_song_to_mpd(song)?;
+            mpd_conn.push(mpd_song)?;
+        }
         Ok(())
     }
 
@@ -868,6 +907,13 @@ Useful to avoid a too heavy load on a machine.")
                 .help("Make a playlist of similar albums from the current album.")
                 .takes_value(false)
             )
+            .arg(Arg::with_name("entire")
+                .long("from-entire-playlist")
+                .help("Make a playlist of songs similar to all the playlist's songs, \
+                    instead of just the first one. Defaults to using the distance metric \
+                    extended_isolation_forest, which give the best results.")
+                .takes_value(false)
+            )
         )
         .subcommand(
             SubCommand::with_name("interactive-playlist")
@@ -957,29 +1003,49 @@ Defaults to 3, cannot be more than 9."
         if sub_m.is_present("album") {
             library.queue_from_current_album(number_songs, dry_run, keep_queue)?;
         } else {
-            let distance_metric = if let Some(m) = sub_m.value_of("distance") {
-                match m {
-                    "euclidean" => euclidean_distance,
-                    "cosine" => cosine_distance,
-                    _ => bail!("Please choose a distance name, between 'euclidean' and 'cosine'."),
-                }
-            } else {
-                euclidean_distance
+            // TODO let users customize options?
+            let forest_distance: &dyn DistanceMetricBuilder = &ForestOptions {
+                n_trees: 1000,
+                sample_size: 200,
+                max_tree_depth: None,
+                extension_level: 10,
             };
 
-            let sort = match sub_m.is_present("seed") {
+            let distance_metric: &dyn DistanceMetricBuilder = if let Some(m) =
+                sub_m.value_of("distance")
+            {
+                match m {
+                    "euclidean" => &euclidean_distance,
+                    "cosine" => &cosine_distance,
+                    "extended_isolation_forest" => forest_distance,
+                    _ => bail!("Please choose a distance name, between 'euclidean', 'cosine' and 'extended_isolation_forest'."),
+                }
+            } else {
+                &euclidean_distance
+            };
+
+            let mut sort = match sub_m.is_present("seed") {
                 false => closest_to_songs,
                 true => song_to_song,
             };
-            library.queue_from_song(
-                sub_m.value_of("from-song"),
-                number_songs,
-                &distance_metric,
-                sort,
-                !no_dedup,
-                dry_run,
-                keep_queue,
-            )?;
+            if sub_m.is_present("entire") {
+                library.queue_from_current_playlist(
+                    number_songs,
+                    distance_metric,
+                    &mut sort,
+                    !no_dedup,
+                )?;
+            } else {
+                library.queue_from_song(
+                    sub_m.value_of("from-song"),
+                    number_songs,
+                    distance_metric,
+                    sort,
+                    !no_dedup,
+                    dry_run,
+                    keep_queue,
+                )?;
+            }
         }
     } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
         let number_choices: usize = sub_m.value_of("choices").unwrap_or("3").parse()?;

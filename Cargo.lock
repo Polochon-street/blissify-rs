@@ -156,6 +156,7 @@ dependencies = [
  "clap",
  "dirs 3.0.2",
  "env_logger",
+ "extended-isolation-forest",
  "indicatif 0.16.2",
  "log",
  "mpd",
