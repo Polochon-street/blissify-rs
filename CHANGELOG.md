@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.4.1
+* Make the "--seed-song" option return faster.
+
 ## blissify 0.4.0
 * Add a "--keep-current-queue" flag that keeps the current queue while making playlists,
   instead of automatically cropping it.
