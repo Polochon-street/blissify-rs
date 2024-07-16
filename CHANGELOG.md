@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.4.2
+* Add a "playlist from playlist" feature (Thanks @SimonTeixidor!)
+
 ## blissify 0.4.1
 * Make the "--seed-song" option return faster.
 
@@ -10,6 +13,8 @@
 * Add a "--dry-run" option.
 * Add a "--from-song" option to select a specific song from the command-line.
 * Default to deduplicating songs when making playlist; add a "--no-deduplication" option.
+
+## blissify 0.3.12
 * Use window / offset to read the list of MPD files to avoid timeout errors.
 
 ## blissify 0.3.11
