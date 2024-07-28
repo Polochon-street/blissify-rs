@@ -171,3 +171,24 @@ $ blissify playlist 100 --dry-run
 If you are interested about what is happening under the hood, or want to make
 a similar plug-in for other audio players, see
 [bliss' doc](https://docs.rs/crate/bliss-audio/).
+
+# Troubleshooting
+
+If you are compiling blissify-rs for non-linux OSes, you might run into an
+error telling you to use the bindgen feature:
+
+```
+error: failed to run custom build command for `bliss-audio-aubio-sys v0.2.2`
+
+Caused by:
+  process didn't exit successfully: `path/release/build/bliss-audio-aubio-sys-fb4d0ec74b3698ed/build-script-build` (exit status: 101)
+  --- stderr
+  thread 'main' panicked at .cargo/registry/src/index.crates.io-6f17d22bba15001f/bliss-audio-aubio-sys-0.2.2/build.rs:34:13:
+  No prebuilt bindings. Try use `bindgen` feature.
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...
+error: failed to compile `blissify v0.4.1`, intermediate artifacts can be found at `/var/folders/pb/g43q604n6v71kwp_89ccy6840000gn/T/cargo-installoyKiUv`.
+To reuse those artifacts with a future compilation, set the environment variable `CARGO_TARGET_DIR` to that path.
+```
+
+To fix this and build blissify-rs successfully, use `cargo install blissify --features=default,bliss-audio/update-aubio-bindings`.
