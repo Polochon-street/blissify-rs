@@ -236,17 +236,12 @@ impl MPDLibrary {
     fn bliss_song_to_mpd(&self, song: &LibrarySong<()>) -> Result<MPDSong> {
         let path = match song.bliss_song.cue_info.to_owned() {
             Some(cue_info) => {
-                let track_number = song
-                    .bliss_song
-                    .track_number
-                    .to_owned()
-                    .ok_or_else(|| {
-                        BlissError::ProviderError(format!(
-                            "CUE track {} has an invalid track number",
-                            song.bliss_song.path.display()
-                        ))
-                    })?
-                    .parse::<usize>()?;
+                let track_number = song.bliss_song.track_number.ok_or_else(|| {
+                    BlissError::ProviderError(format!(
+                        "CUE track {} has an invalid track number",
+                        song.bliss_song.path.display()
+                    ))
+                })?;
                 cue_info.cue_path.join(format!("track{:04}", track_number))
             }
             _ => song.bliss_song.path.to_owned(),
@@ -347,7 +342,7 @@ impl MPDLibrary {
 
         let current_track_number = if let Some(track_number) = &current_song.bliss_song.track_number
         {
-            track_number.parse::<usize>().unwrap_or(1)
+            *track_number as usize
         } else {
             1
         };
@@ -1405,9 +1400,9 @@ mod test {
                 .execute(
                     "
                 insert into song (id, path, analyzed, album, track_number, duration, version) values
-                    (1,'path/first_song.flac', true, 'Coucou', '01', 10, 1),
-                    (2,'path/second_song.flac', true, 'Swag', '01', 20, 1),
-                    (3,'path/last_song.flac', true, 'Coucou', '02', 30, 1),
+                    (1,'path/first_song.flac', true, 'Coucou', 1, 10, 1),
+                    (2,'path/second_song.flac', true, 'Swag', 1, 20, 1),
+                    (3,'path/last_song.flac', true, 'Coucou', 2, 30, 1),
                     (4,'path/unanalyzed.flac', false, null, null, null, null)
                 ",
                     [],
