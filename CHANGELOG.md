@@ -1,5 +1,12 @@
 # Changelog
 
+## blissify 0.5.0
+Note: to take advantage of the fix below, a rescan is needed if you
+have an existing database.
+* Take into account discs while doing an album playlist.
+* Add and store `disc_number` in the database.
+* Make `track_number` an integer.
+
 ## blissify 0.4.2
 * Add a "playlist from playlist" feature (Thanks @SimonTeixidor!)
 
