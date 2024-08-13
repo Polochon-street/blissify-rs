@@ -28,11 +28,12 @@ headers) to install it, as well as a
 
 On Debian-based systems:
 
-    apt install -y clang libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev libavdevice-dev libsqlite3-dev pkg-config
+    $ sudo apt install -y build-essential pkg-config libavutil-dev libavformat-dev \
+    libavfilter-dev libavdevice-dev libclang-dev libsqlite3-dev
 
 On Archlinux:
 
-    pacman -S base-devel clang ffmpeg
+    $ sudo pacman -S base-devel clang ffmpeg
 
 Finally, use `cargo install blissify` to install it.
 
