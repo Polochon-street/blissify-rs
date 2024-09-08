@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.5.1
+* Add support for Mahalanobis distance.
+
 ## blissify 0.5.0
 Note: to take advantage of the fix below, a rescan is needed if you
 have an existing database.
