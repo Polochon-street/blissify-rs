@@ -9,6 +9,8 @@ ask questions if you want to tackle an item.
 
 ## Actual TODO
 
+- Add a feature to focus on a specific feature ("I want tempo being prioritized, or timbre, or tonal features")
+  => take advantage of the Mahalanobis distance and make it easy-ish to use
 - Erroneous report with CUE files (see https://github.com/Polochon-street/blissify-rs/issues/48)
 - Try to trim out the crates (it's too big rn)
 - grep TODO and see what can be fixed

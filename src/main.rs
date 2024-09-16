@@ -9,7 +9,8 @@
 use anyhow::{bail, Context, Result};
 use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong};
 use bliss_audio::playlist::{
-    closest_to_songs, cosine_distance, euclidean_distance, song_to_song, DistanceMetricBuilder,
+    closest_to_songs, cosine_distance, euclidean_distance, mahalanobis_distance_builder,
+    song_to_song, DistanceMetricBuilder,
 };
 use bliss_audio::{BlissError, BlissResult};
 use clap::{App, Arg, ArgMatches, SubCommand};
@@ -361,13 +362,11 @@ impl MPDLibrary {
                 .iter()
                 .take_while(|s| {
                     for (tagname, value) in s.tags.iter() {
-                        if tagname.to_ascii_lowercase() == String::from("album")
-                            && *value == current_album
-                        {
+                        if tagname.to_ascii_lowercase() == *"album" && *value == current_album {
                             return true;
                         }
                     }
-                    return false;
+                    false
                 })
                 .count();
             let index = playlist
@@ -888,7 +887,7 @@ Useful to avoid a too heavy load on a machine.")
                 .long("distance")
                 .value_name("distance metric")
                 .help(
-                    "Choose the distance metric used to make the playlist. Default is 'euclidean' for playlists from a single song, and 'extended_isolation_forest' for playlists from multiple songs. Other options are 'cosine', and 'extended_isolation_forest'. The extended_isolation_forest works better for playlists from multiple songs."
+                    "Choose the distance metric used to make the playlist. Default is 'euclidean' for playlists from a single song, and 'extended_isolation_forest' for playlists from multiple songs. Other options are 'cosine', 'mahalanobis', and 'extended_isolation_forest'. By default, the mahalanobis distance is the same as the euclidean distance. You can tailor this distance to your tastes by running metric learning e.g. using https://github.com/Polochon-street/bliss-metric-learning. The extended_isolation_forest works better for playlists from multiple songs."
                 )
                 .default_value("euclidean")
             )
@@ -1049,8 +1048,11 @@ Defaults to 3, cannot be more than 9."
                 match m {
                     "euclidean" => &euclidean_distance,
                     "cosine" => &cosine_distance,
+                    "mahalanobis" => {
+                        &mahalanobis_distance_builder(library.library.config.base_config.m.to_owned())
+                    }
                     "extended_isolation_forest" => forest_distance,
-                    _ => bail!("Please choose a distance name, between 'euclidean', 'cosine' and 'extended_isolation_forest'."),
+                    _ => bail!("Please choose a distance name, between 'euclidean', 'cosine', 'mahalanobis' and 'extended_isolation_forest'."),
                 }
             } else {
                 &euclidean_distance

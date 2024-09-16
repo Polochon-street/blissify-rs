@@ -101,9 +101,8 @@ checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
 name = "bliss-audio"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2049135b0da45f317b0932427d8ab5f0fe669597d9819638bdeca122b6a047b8"
+version = "0.9.1"
+source = "git+https://github.com/Polochon-street/bliss-rs/#c86770896706aa51569f6c216d9c80576c4d73ef"
 dependencies = [
  "adler32",
  "anyhow",
@@ -149,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "bliss-audio",
@@ -645,6 +644,7 @@ dependencies = [
  "num-traits",
  "rawpointer",
  "rayon",
+ "serde",
 ]
 
 [[package]]
