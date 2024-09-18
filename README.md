@@ -167,6 +167,24 @@ can use the `--dry-run` option, like so:
 $ blissify playlist 100 --dry-run
 ```
 
+# Metric learning
+
+If you feel like making your smart™️  playlists even smarter®️ , take a look
+at the [metric-learning](https://github.com/Polochon-street/bliss-metric-learning)
+repo. It gives you the possibility of evaluating the proximity of your own
+songs, and tailor playlists to your own taste.
+
+Once you ran the tool in the [metric-learning](https://github.com/Polochon-street/bliss-metric-learning)
+repo, you can use the mahalanobis distance to make playlists from the learned
+metric:
+
+```
+$ blissify playlist 100 --distance mahalanobis
+```
+
+Note that it is all very much alpha development, so if you have any feedback,
+feel free to submit an issue.
+
 # Details
 
 If you are interested about what is happening under the hood, or want to make
