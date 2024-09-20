@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.5.2
+* Integration tests can now be run using `cargo test --features=integration-tests`.
+
 ## blissify 0.5.1
 * Add support for Mahalanobis distance.
 

@@ -19,12 +19,12 @@ jobs:
       with:
         submodules: recursive
     - name: Packages
-      run: sudo apt-get update && sudo apt-get install build-essential yasm libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavfilter-dev libavdevice-dev libswresample-dev libfftw3-dev ffmpeg
+      run: sudo apt-get update && sudo apt-get install build-essential yasm libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavfilter-dev libavdevice-dev libswresample-dev libfftw3-dev ffmpeg mpd
     - name: Check format
       run: cargo fmt -- --check
     - name: Lint
-      run: cargo clippy --examples -- -D warnings
+      run: cargo clippy --features=integration-tests --examples -- -D warnings
     - name: Build
       run: cargo build --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose --features=integration-tests
