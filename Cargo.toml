@@ -15,9 +15,13 @@ readme = "README.md"
 default = ["bliss-audio/library"]
 # Build for raspberry pis
 rpi = ["bliss-audio/rpi"]
+# Make `cargo test` also run the integration tests. You need to have
+# MPD installed for it to work, and it will launch its own instance of
+# MPD.
+integration-tests = ["bliss-audio/integration-tests"]
 
 [dependencies]
-bliss-audio = "0.9.1"
+bliss-audio = "0.9.2"
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
@@ -31,3 +35,8 @@ termion = "1.5.6"
 serde = "1.0"
 pretty_assertions = "1.2.1"
 extended-isolation-forest = { version = "0.2.3", default-features = false }
+
+[dev-dependencies]
+assert_cmd = "2.0.14"
+predicates = "3.1.0"
+assert_fs = "1.1.1"
