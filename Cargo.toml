@@ -25,7 +25,8 @@ integration-tests = ["bliss-audio/integration-tests"]
 symphonia = ["bliss-audio/symphonia-all"]
 
 [dependencies]
-bliss-audio = "0.10.0"
+#bliss-audio = {git = "https://github.com/Polochon-street/bliss-rs/", branch = "add-list-errors-library"}
+bliss-audio = "0.10.1"
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
