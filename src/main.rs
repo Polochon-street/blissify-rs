@@ -7,7 +7,7 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong};
+use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong, ProcessingError};
 use bliss_audio::playlist::{
     closest_to_songs, cosine_distance, euclidean_distance, mahalanobis_distance_builder,
     song_to_song, DistanceMetricBuilder,
@@ -828,6 +828,10 @@ fn main() -> Result<()> {
             )
         )
         .subcommand(
+            SubCommand::with_name("list-errors")
+            .about("Print songs which could not be analyzed correctly, as well as the associated errors.")
+        )
+        .subcommand(
             SubCommand::with_name("init")
             .about("Initializes an MPD library")
             .arg(Arg::with_name("MPD_BASE_PATH")
@@ -980,6 +984,13 @@ Defaults to 3, cannot be more than 9."
             } else {
                 println!("{}", song.bliss_song.path.display());
             }
+        }
+    } else if let Some(_) = matches.subcommand_matches("list-errors") {
+        let library = MPDLibrary::from_config_path(config_path)?;
+        let mut failed_songs: Vec<ProcessingError> = library.library.get_failed_songs()?;
+        failed_songs.sort_by_key(|x| x.song_path.clone());
+        for error in failed_songs {
+            println!("{}: {}", error.song_path.display(), error.error);
         }
     } else if let Some(sub_m) = matches.subcommand_matches("init") {
         let database_path = sub_m.value_of("database-path").map(PathBuf::from);

@@ -17,7 +17,7 @@ default = ["bliss-audio/library"]
 rpi = ["bliss-audio/rpi"]
 
 [dependencies]
-bliss-audio = "0.9.1"
+bliss-audio = {git = "https://github.com/Polochon-street/bliss-rs/", branch = "add-list-errors-library"}
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
