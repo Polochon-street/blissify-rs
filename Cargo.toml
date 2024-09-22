@@ -12,20 +12,22 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["bliss-audio/library"]
+default = ["bliss-audio/library", "bliss-audio/aubio-static", "ffmpeg"]
 # Build for raspberry pis
 rpi = ["bliss-audio/rpi"]
+ffmpeg = ["bliss-audio/ffmpeg"]
 # Make `cargo test` also run the integration tests. You need to have
 # MPD installed for it to work, and it will launch its own instance of
 # MPD.
 integration-tests = ["bliss-audio/integration-tests"]
 # If you want to use the pure rust symphonia decoder, instead of ffmpeg.
 # Saves you an external dependency and the hassle of packaging, but is
-# slightly slower and less accurate.
-symphonia = ["bliss-audio/symphonia-all"]
+# slightly slower and less accurate. Then build with
+# `--no-default-features --features=symphonia`.
+symphonia = ["bliss-audio/symphonia-all", "bliss-audio/library", "bliss-audio/aubio-static"]
 
 [dependencies]
-bliss-audio = "0.10.0"
+bliss-audio = {version = "0.10.1", default-features = false}
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
