@@ -805,20 +805,20 @@ fn parse_number_cores(matches: &ArgMatches) -> Result<Option<NonZeroUsize>, Blis
 
 fn main() -> Result<()> {
     env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "warn"));
+    let config_argument = Arg::with_name("config-path")
+            .short("c")
+            .long("config-path")
+            .help(
+                "Optional argument specifying the configuration path, for both loading and initializing blissify. Example: \"/path/to/config.json\". If not specified, defaults to \"XDG_CONFIG_HOME/bliss-rs/config.json\", e.g. \"/home/user/.config/bliss-rs/config.json\".",
+            )
+            .required(false)
+            .takes_value(true);
 
     let matches = App::new("blissify")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Polochon_street")
         .about("Analyze and make smart playlists from an MPD music database.")
-        .arg(Arg::with_name("config-path")
-             .short("c")
-             .long("config-path")
-            .help(
-                "Optional argument specifying the configuration path, for both loading and initializing blissify. Example: \"/path/to/config.json\".",
-            )
-            .required(false)
-            .takes_value(true)
-        )
+        .arg(config_argument.clone().hidden(true))
         .subcommand(
             SubCommand::with_name("list-db")
             .about("Print songs that have been analyzed and are in blissify's database.")
@@ -826,19 +826,27 @@ fn main() -> Result<()> {
                 .takes_value(false)
                 .help("Display analyzed song paths, as well as the corresponding analysis.")
             )
+            .arg(config_argument.clone())
         )
         .subcommand(
             SubCommand::with_name("init")
-            .about("Initializes an MPD library")
+            .about(
+                "Initialize blissify on an MPD library.\n\
+                By default, it creates the configuration folder \"bliss-rs\" \
+                in XDG_CONFIG_HOME, most likely `/home/user/.config/bliss-rs`, \
+                and analyzes the songs in the given MPD library.\n\
+                It can take some time."
+            )
             .arg(Arg::with_name("MPD_BASE_PATH")
                 .help("MPD base path. The value of `music_directory` in your mpd.conf.")
                 .required(true)
             )
+            .arg(config_argument.clone())
             .arg(Arg::with_name("database-path")
                 .short("d")
                 .long("database-path")
                 .help(
-                    "Optional argument specifying where to store the database containing analyzed songs. Example: \"/path/to/bliss.db\"",
+                    "Optional argument specifying where to store the database containing analyzed songs. Example: \"/path/to/bliss.db\". If not specified, defaults to \"XDG_CONFIG_HOME/bliss-rs/songs.db\", e.g. \"/home/user/.config/bliss-rs/songs.db\"."
                 )
                 .required(false)
                 .takes_value(true)
@@ -854,6 +862,7 @@ Useful to avoid a too heavy load on a machine.")
         )
         .subcommand(
             SubCommand::with_name("rescan")
+            .arg(config_argument.clone())
             .arg(Arg::with_name("number-cores")
                 .long("number-cores")
                 .help(
@@ -866,6 +875,7 @@ Useful to avoid a too heavy load on a machine.")
         )
         .subcommand(
             SubCommand::with_name("update")
+            .arg(config_argument.clone())
             .arg(Arg::with_name("number-cores")
                 .long("number-cores")
                 .help(
@@ -879,6 +889,7 @@ Useful to avoid a too heavy load on a machine.")
         .subcommand(
             SubCommand::with_name("playlist")
             .about("Make a playlist from the currently playing song, clearing the queue and queuing NUMBER_SONGS songs similar to the currently playing song. See the other flags if you want to e.g. preserve the queue.")
+            .arg(config_argument.clone())
             .arg(Arg::with_name("NUMBER_SONGS")
                 .help("Number of items to queue, including the first song.")
                 .required(true)
@@ -942,6 +953,7 @@ Useful to avoid a too heavy load on a machine.")
             .about(
                 "Make a playlist, prompting a set of close songs, and asking which one will be the most appropriate."
             )
+            .arg(config_argument.clone())
             .arg(Arg::with_name("continue")
                 .long("continue")
                 .help(
@@ -960,7 +972,13 @@ Defaults to 3, cannot be more than 9."
         )
         .get_matches();
 
-    let config_path = matches.value_of("config-path").map(PathBuf::from);
+    let mut config_path = match matches.subcommand() {
+        (_, Some(sub_m)) => sub_m.value_of("config-path").map(PathBuf::from),
+        _ => None,
+    };
+    if config_path.is_none() {
+        config_path = matches.value_of("config-path").map(PathBuf::from);
+    }
     if let Some(sub_m) = matches.subcommand_matches("list-db") {
         let library = MPDLibrary::from_config_path(config_path)?;
         let mut songs: Vec<LibrarySong<()>> = library.library.songs_from_library()?;

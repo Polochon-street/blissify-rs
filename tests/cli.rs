@@ -20,9 +20,9 @@ mod tests {
     "#;
 
     struct TestSettings {
-        mpd_conf_file: assert_fs::NamedTempFile,
+        _mpd_conf_file: assert_fs::NamedTempFile,
         socket_file: assert_fs::NamedTempFile,
-        handle: Child,
+        _handle: Child,
     }
 
     fn start_mpd() -> Result<TestSettings, Box<dyn std::error::Error>> {
@@ -47,14 +47,15 @@ mod tests {
             .spawn()?;
 
         Ok(TestSettings {
-            mpd_conf_file,
+            _mpd_conf_file: mpd_conf_file,
             socket_file,
-            handle,
+            _handle: handle,
         })
     }
 
     #[test]
     fn test_init_default() -> Result<(), Box<dyn std::error::Error>> {
+        env::remove_var("XDG_CONFIG_HOME");
         let mut data_directory = env::current_dir()?;
         data_directory.push("./data");
         let test_settings = start_mpd()?;
@@ -105,12 +106,12 @@ mod tests {
         }
 
         let mut cmd = Command::cargo_bin("blissify")?;
-        cmd.arg("-c")
-            .arg(temp_dir.path().join("test.json"))
-            .arg("init")
+        cmd.arg("init")
             .arg(data_directory)
             .arg("-d")
             .arg(temp_dir.path().join("test.db"))
+            .arg("-c")
+            .arg(temp_dir.path().join("test.json"))
             .env("MPD_HOST", socket_path);
         cmd.assert().success();
         assert!(temp_dir.path().join("test.json").exists());
@@ -122,6 +123,12 @@ mod tests {
     fn test_list_db_fail() -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::cargo_bin("blissify")?;
 
+        cmd.arg("list-db").arg("-c").arg("/tmp/nonexisting");
+        cmd.assert()
+            .failure()
+            .stderr(predicate::str::contains("No such file or directory"));
+
+        let mut cmd = Command::cargo_bin("blissify")?;
         cmd.arg("-c").arg("/tmp/nonexisting").arg("list-db");
         cmd.assert()
             .failure()

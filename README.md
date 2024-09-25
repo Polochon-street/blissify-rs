@@ -58,10 +58,10 @@ It will create a configuration file `config.json` and a database file
 `songs.db` in `~/.local/share/bliss-rs`. If you want to specify a different
 path for the configuration file and the database file, running
 ```
-$ blissify -c /path/to/configuration.json init -d /path/to/database.db /path/to/mpd/root
+$ blissify init -d /path/to/database.db /path/to/mpd/root -c /path/to/configuration.json
 ```
 should do the trick. All the subsequent blissify commands should start
-with `blissify -c /path/to/configuration.json` in order to work.
+with `blissify <command> -c /path/to/configuration.json` in order to work.
 
 Note that it may take several minutes (up to some hours, on very large
 libraries with more than for instance 20k songs) to complete.

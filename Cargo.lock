@@ -138,9 +138,9 @@ checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
 name = "bliss-audio"
-version = "0.9.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7550cbcf4faf8d9fb8db7ddaabda90eaa84a234142c06066c84c7bcd860fced7"
+checksum = "191f4a248aa795440b59bc9f994fddc21428959d00ddef704e81cced1453411d"
 dependencies = [
  "adler32",
  "anyhow",
