@@ -1,4 +1,4 @@
-// TODO before publishing: gate it behind the feature
+#[cfg(feature = "integration-tests")]
 mod tests {
     use assert_cmd::prelude::*;
     use assert_fs::prelude::*;
