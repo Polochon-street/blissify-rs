@@ -21,7 +21,7 @@ rpi = ["bliss-audio/rpi"]
 integration-tests = ["bliss-audio/integration-tests"]
 
 [dependencies]
-bliss-audio = "0.9.2"
+bliss-audio = "0.9.3"
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
