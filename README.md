@@ -33,7 +33,7 @@ On Debian-based systems:
 
 On Archlinux:
 
-    $ sudo pacman -S base-devel clang ffmpeg
+    $ sudo pacman -S base-devel clang ffmpeg sqlite
 
 Finally, use `cargo install blissify` to install it.
 
