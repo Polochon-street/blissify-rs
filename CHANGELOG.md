@@ -1,6 +1,9 @@
 # Changelog
 
 ## blissify 0.5.2
+* Bump bliss-rs.
+
+## blissify 0.5.2
 * Put the `--config-path` argument after the subcommand for consistency's sake.
 * Use XDG_CONFIG_HOME instead of XDG_DATA_HOME to put config files, making
   sure to still check XDG_DATA_HOME for users with an existing database.
