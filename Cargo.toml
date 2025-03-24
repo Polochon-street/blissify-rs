@@ -1,6 +1,6 @@
 [package]
 name = "blissify"
-version = "0.5.3"
+version = "0.5.4"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2021"
 license = "GPL-3.0-only"
@@ -19,9 +19,13 @@ rpi = ["bliss-audio/rpi"]
 # MPD installed for it to work, and it will launch its own instance of
 # MPD.
 integration-tests = ["bliss-audio/integration-tests"]
+# If you want to use the pure rust symphonia decoder, instead of ffmpeg.
+# Saves you an external dependency and the hassle of packaging, but is
+# slightly slower and less accurate.
+symphonia = ["bliss-audio/symphonia-all"]
 
 [dependencies]
-bliss-audio = "0.9.4"
+bliss-audio = "0.10.0"
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"

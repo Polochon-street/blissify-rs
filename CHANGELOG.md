@@ -1,6 +1,9 @@
 # Changelog
 
-## blissify 0.5.2
+## blissify 0.5.4
+* Bump bliss-rs to add the Symphonia decoder.
+
+## blissify 0.5.3
 * Bump bliss-rs.
 
 ## blissify 0.5.2
