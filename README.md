@@ -35,12 +35,23 @@ On Archlinux:
 
     $ sudo pacman -S base-devel clang ffmpeg sqlite
 
-Finally, use `cargo install blissify` to install it.
+Finally, install it using:
+
+    $ cargo install blissify
 
 Note: if you are using a raspberry pi and its corresponding ffmpeg
 (i.e. `ffmpeg -version|grep rpi` gives back something), use
 `cargo install --features=rpi blissify` instead.
 
+By default, blissify uses [FFmpeg](https://www.ffmpeg.org/) to decode songs.
+Instead of using FFmpeg, you can also use
+[Symphonia](https://github.com/pdeljanov/Symphonia) by using the `symphonia`
+feature: `cargo install --features=symphonia`. Symphonia supports slightly
+less audio formats and the analysis results are slightly different than with
+ffmpeg, so make sure to always use either blissify compiled with Symphonia or
+blissify compiled with ffmepg - but do not mix both.
+Since Symphonia is written in pure Rust, you will
+remove the need for ffmpeg, which can be a quite big external dependency.
 
 All the commands below read the `MPD_HOST` and `MPD_PORT` environment
 variables and try to reach MPD using that. You might want to change

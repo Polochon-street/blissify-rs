@@ -40,7 +40,10 @@ use std::{io::Read, os::unix::net::UnixStream};
 use termion::input::TermRead;
 use termion::raw::IntoRawMode;
 
-use bliss_audio::decoder::ffmpeg::FFmpeg as Decoder;
+#[cfg(not(feature = "symphonia"))]
+use bliss_audio::decoder::ffmpeg::FFmpegDecoder as Decoder;
+#[cfg(feature = "symphonia")]
+use bliss_audio::decoder::symphonia::SymphoniaDecoder as Decoder;
 
 /// The main struct that stores both the Library object, and some other
 /// helper functions to make everything work properly.

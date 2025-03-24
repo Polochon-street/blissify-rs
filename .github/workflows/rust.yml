@@ -28,3 +28,5 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose --features=integration-tests
+    - name: Run tests (symphonia)
+      run: cargo test --verbose --features=integration-tests,symphonia
