@@ -7,7 +7,7 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong};
+use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong, ProcessingError};
 use bliss_audio::playlist::{
     closest_to_songs, cosine_distance, euclidean_distance, mahalanobis_distance_builder,
     song_to_song, DistanceMetricBuilder,
@@ -505,6 +505,7 @@ impl MPDLibrary {
     // TODO do we want a flag to toggle "random" off automatically here? And a flag to keep /
     // exclude the current song from the playlist?
     // TODO maybe we don't have to collect? But the magic at the end makes it very convenient
+    #[allow(clippy::too_many_arguments)]
     fn queue_from_song<'a, F, I>(
         &self,
         song_path: Option<&str>,
@@ -832,6 +833,10 @@ fn main() -> Result<()> {
             .arg(config_argument.clone())
         )
         .subcommand(
+            SubCommand::with_name("list-errors")
+            .about("Print songs which could not be analyzed correctly, as well as the associated errors.")
+        )
+        .subcommand(
             SubCommand::with_name("init")
             .about(
                 "Initialize blissify on an MPD library.\n\
@@ -1000,6 +1005,17 @@ Defaults to 3, cannot be more than 9."
                 );
             } else {
                 println!("{}", song.bliss_song.path.display());
+            }
+        }
+    } else if matches.subcommand_matches("list-errors").is_some() {
+        let library = MPDLibrary::from_config_path(config_path)?;
+        let mut failed_songs: Vec<ProcessingError> = library.library.get_failed_songs()?;
+        if failed_songs.is_empty() {
+            println!("No errors were found from previous analyses.");
+        } else {
+            failed_songs.sort_by_key(|x| x.song_path.clone());
+            for error in &failed_songs {
+                println!("{}: {}", error.song_path.display(), error.error);
             }
         }
     } else if let Some(sub_m) = matches.subcommand_matches("init") {
@@ -1317,6 +1333,22 @@ mod test {
     }
 
     #[test]
+    fn test_list_errors() {
+        let (mut library, _tempdir) = setup_library();
+        library.library.config.mpd_base_path = PathBuf::from("data");
+        library.full_rescan().unwrap();
+        let failed_songs = library.library.get_failed_songs().unwrap();
+        assert_eq!(
+            failed_songs,
+            vec![ProcessingError {
+                song_path: "data/foo".into(),
+                error: "error happened while decoding file - while opening format for file 'data/foo': ffmpeg::Error(2: No such file or directory).".into(),
+                features_version: 1,
+            }],
+        )
+    }
+
+    #[test]
     fn test_playlist_no_song() {
         let (library, _tempdir) = setup_library();
 
@@ -1325,11 +1357,11 @@ mod test {
             sqlite_conn
                 .execute(
                     "
-                insert into song (id, path, analyzed, duration) values
-                    (1,'path/first_song.flac', true, 50),
-                    (2,'path/second_song.flac', true, 50),
-                    (3,'path/last_song.flac', true, 50),
-                    (4,'path/unanalyzed.flac', false, 50)
+                insert into song (id, path, analyzed, duration, version) values
+                    (1,'path/first_song.flac', true, 50, 1),
+                    (2,'path/second_song.flac', true, 50, 1),
+                    (3,'path/last_song.flac', true, 50, 1),
+                    (4,'path/unanalyzed.flac', false, 50, 1)
                 ",
                     [],
                 )
@@ -1360,11 +1392,11 @@ mod test {
             sqlite_conn
                 .execute(
                     "
-                insert into song (id, path, analyzed) values
-                    (1,'path/first_song.flac', true),
-                    (2,'path/second_song.flac', true),
-                    (3,'path/last_song.flac', true),
-                    (4,'path/unanalyzed.flac', false)
+                insert into song (id, path, analyzed, version) values
+                    (1,'path/first_song.flac', true, 1),
+                    (2,'path/second_song.flac', true, 1),
+                    (3,'path/last_song.flac', true, 1),
+                    (4,'path/unanalyzed.flac', false, 1)
                 ",
                     [],
                 )
@@ -1426,7 +1458,7 @@ mod test {
                     (1,'path/first_song.flac', true, 'Coucou', 1, 10, 1),
                     (2,'path/second_song.flac', true, 'Swag', 1, 20, 1),
                     (3,'path/last_song.flac', true, 'Coucou', 2, 30, 1),
-                    (4,'path/unanalyzed.flac', false, null, null, null, null)
+                    (4,'path/unanalyzed.flac', false, null, null, null, 1)
                 ",
                     [],
                 )
@@ -1585,9 +1617,9 @@ mod test {
             sqlite_conn
                 .execute(
                     "
-                insert into song (id, path, analyzed) values
-                    (1, 'data/s16_mono_22_5kHz.flac', true),
-                    (10, 'data/coucou.flac', true)
+                insert into song (id, path, analyzed, version) values
+                    (1, 'data/s16_mono_22_5kHz.flac', true, 1),
+                    (10, 'data/coucou.flac', true, 1)
                 ",
                     [],
                 )
@@ -1632,8 +1664,6 @@ mod test {
         assert_eq!(
             expected_songs,
             vec![
-                // TODO this should be deleted
-                (String::from("data/coucou.flac"), true),
                 (String::from("data/foo"), false),
                 (String::from("data/s16_mono_22_5kHz.flac"), true),
                 (String::from("data/s16_stereo_22_5kHz.flac"), true),
@@ -1665,8 +1695,8 @@ mod test {
             sqlite_conn
                 .execute(
                     "
-                insert into song (id, path, analyzed) values
-                    (1, 'data/s16_mono_22_5kHz.flac', false)
+                insert into song (id, path, analyzed, version) values
+                    (1, 'data/s16_mono_22_5kHz.flac', false, 1)
                 ",
                     [],
                 )

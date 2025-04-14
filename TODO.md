@@ -20,5 +20,6 @@ ask questions if you want to tackle an item.
 - A waypoint feature: go from song1 to song2, both picked by the users, in n songs, without any repetitions between playlist 1 and playlist 2
 - A direction feature ("I want the tempo to go down or stay the same")
 - A "song group" feature (I want to make a playlist that's in the vibe of these n songs [like 4-5])
+- Update clap using the derive feature, and look for clap tests
 
 ## Done
