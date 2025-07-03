@@ -28,21 +28,26 @@ mod tests {
     fn start_mpd() -> Result<TestSettings, Box<dyn std::error::Error>> {
         let mut data_directory = env::current_dir()?;
         data_directory.push("./data");
-        let mpd_conf_file = assert_fs::NamedTempFile::new("mpd.conf")?;
-        let socket_file = assert_fs::NamedTempFile::new("socket")?;
-        let port: String = format!("{}", 7777);
+        let mpd_conf_file = assert_fs::NamedTempFile::new("mpd.conf")?.into_persistent();
+        let socket_file = assert_fs::NamedTempFile::new("socket")?.into_persistent();
         let mpd_conf = MPD_CONF
             .replace("MUSIC_DIRECTORY", &data_directory.to_string_lossy())
             .replace(
                 "DATABASE_FILE",
                 &data_directory.as_path().join("database").to_string_lossy(),
             )
-            .replace("PORT", &port)
             .replace("SOCKET_PATH", socket_file.to_str().unwrap());
         mpd_conf_file.write_str(&mpd_conf)?;
         let handle = Command::new("mpd")
             .arg(mpd_conf_file.to_owned().to_str().unwrap())
             .arg("--no-daemon")
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        Command::new("mpc")
+            .arg("-h")
+            .arg(socket_file.to_str().unwrap())
+            .arg("update")
             .stderr(Stdio::null())
             .spawn()?;
 
@@ -80,6 +85,13 @@ mod tests {
         cmd.assert().success();
         assert!(Path::new("/tmp/bliss-rs/config.json").exists());
         assert!(Path::new("/tmp/bliss-rs/songs.db").exists());
+
+        let mut cmd = Command::cargo_bin("blissify")?;
+        cmd.arg("list-db").env("MPD_HOST", socket_path);
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("s16_mono"));
+
         Ok(())
     }
 
@@ -133,6 +145,49 @@ mod tests {
         cmd.assert()
             .failure()
             .stderr(predicate::str::contains("No such file or directory"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_list_errors() -> Result<(), Box<dyn std::error::Error>> {
+        env::remove_var("XDG_CONFIG_HOME");
+        let temp_dir = assert_fs::TempDir::new()?.into_persistent();
+        let mut data_directory = env::current_dir()?;
+        data_directory.push("./data");
+        let test_settings = start_mpd()?;
+        let socket_path = test_settings.socket_file.to_str().unwrap();
+        for i in 0..10 {
+            match UnixStream::connect(socket_path) {
+                Ok(_) => break,
+                Err(_) => thread::sleep(time::Duration::from_millis(500)),
+            };
+            if i == 9 {
+                panic!(
+                    "Could not start MPD for testing, socket {} still closed",
+                    socket_path
+                );
+            }
+        }
+
+        let mut cmd = Command::cargo_bin("blissify")?;
+        cmd.arg("init")
+            .arg(data_directory)
+            .arg("-d")
+            .arg(temp_dir.path().join("test.db"))
+            .arg("-c")
+            .arg(temp_dir.path().join("test.json"))
+            .env("MPD_HOST", socket_path);
+        cmd.assert().success();
+
+        let mut cmd = Command::cargo_bin("blissify")?;
+        cmd.arg("list-errors")
+            .arg("-c")
+            .arg(temp_dir.path().join("test.json"))
+            .env("MPD_HOST", socket_path);
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("empty or too short song"));
 
         Ok(())
     }

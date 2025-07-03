@@ -19,7 +19,7 @@ jobs:
       with:
         submodules: recursive
     - name: Packages
-      run: sudo apt-get update && sudo apt-get install build-essential yasm libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavfilter-dev libavdevice-dev libswresample-dev libfftw3-dev ffmpeg mpd libsqlite3-dev
+      run: sudo apt-get update && sudo apt-get install build-essential yasm libavutil-dev libavcodec-dev libavformat-dev libavfilter-dev libavfilter-dev libavdevice-dev libswresample-dev libfftw3-dev ffmpeg mpd mpc libsqlite3-dev
     - name: Check format
       run: cargo fmt -- --check
     - name: Lint
