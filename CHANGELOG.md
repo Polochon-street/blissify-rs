@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.5.5
+* Add a `list-errors` command to list songs that failed the analysis step.
+
 ## blissify 0.5.4
 * Bump bliss-rs to add the Symphonia decoder.
 
