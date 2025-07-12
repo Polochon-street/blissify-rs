@@ -51,6 +51,20 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()?;
 
+        let socket_path = socket_file.to_str().unwrap();
+        for i in 0..10 {
+            match UnixStream::connect(socket_path) {
+                Ok(_) => break,
+                Err(_) => thread::sleep(time::Duration::from_millis(500)),
+            };
+            if i == 9 {
+                panic!(
+                    "Could not start MPD for testing, socket {} still closed",
+                    socket_path
+                );
+            }
+        }
+
         Ok(TestSettings {
             _mpd_conf_file: mpd_conf_file,
             socket_file,
@@ -65,24 +79,13 @@ mod tests {
         data_directory.push("./data");
         let test_settings = start_mpd()?;
         let socket_path = test_settings.socket_file.to_str().unwrap();
-        for i in 0..10 {
-            match UnixStream::connect(socket_path) {
-                Ok(_) => break,
-                Err(_) => thread::sleep(time::Duration::from_millis(500)),
-            };
-            if i == 9 {
-                panic!(
-                    "Could not start MPD for testing, socket {} still closed",
-                    socket_path
-                );
-            }
-        }
 
         let mut cmd = Command::cargo_bin("blissify")?;
         cmd.arg("init")
             .arg(data_directory)
             .env("MPD_HOST", socket_path);
         cmd.assert().success();
+        // By default, with the "integration-tests" feature, the config dir is "/tmp".
         assert!(Path::new("/tmp/bliss-rs/config.json").exists());
         assert!(Path::new("/tmp/bliss-rs/songs.db").exists());
 
@@ -104,18 +107,6 @@ mod tests {
         data_directory.push("./data");
         let test_settings = start_mpd()?;
         let socket_path = test_settings.socket_file.to_str().unwrap();
-        for i in 0..10 {
-            match UnixStream::connect(socket_path) {
-                Ok(_) => break,
-                Err(_) => thread::sleep(time::Duration::from_millis(500)),
-            };
-            if i == 9 {
-                panic!(
-                    "Could not start MPD for testing, socket {} still closed",
-                    socket_path
-                );
-            }
-        }
 
         let mut cmd = Command::cargo_bin("blissify")?;
         cmd.arg("init")
@@ -157,18 +148,6 @@ mod tests {
         data_directory.push("./data");
         let test_settings = start_mpd()?;
         let socket_path = test_settings.socket_file.to_str().unwrap();
-        for i in 0..10 {
-            match UnixStream::connect(socket_path) {
-                Ok(_) => break,
-                Err(_) => thread::sleep(time::Duration::from_millis(500)),
-            };
-            if i == 9 {
-                panic!(
-                    "Could not start MPD for testing, socket {} still closed",
-                    socket_path
-                );
-            }
-        }
 
         let mut cmd = Command::cargo_bin("blissify")?;
         cmd.arg("init")
