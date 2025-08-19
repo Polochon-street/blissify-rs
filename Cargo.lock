@@ -124,9 +124,8 @@ checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 
 [[package]]
 name = "bliss-audio"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6be289782e34c8b3351c88983ef2cb4e7bd517fa7ad565345cf5e159333a1fce"
+version = "0.11.0"
+source = "git+https://github.com/Polochon-street/bliss-rs/#4ee987d773c02ef2c5931fd6322a70bc735059da"
 dependencies = [
  "adler32",
  "anyhow",
@@ -156,9 +155,9 @@ dependencies = [
 
 [[package]]
 name = "bliss-audio-aubio-rs"
-version = "0.2.2"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bfb72ae2d8bdd563b7218c6f6f423c17350052d8a9f69a8fc018220537fa1bf"
+checksum = "4a1eb88c6ac3439669d67bd728acf23b770c11e4587fe90d0d25be216d988172"
 dependencies = [
  "bliss-audio-aubio-sys",
 ]
@@ -378,7 +377,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

@@ -24,5 +24,7 @@ ask questions if you want to tackle an item.
 - DRY tests/cli.rs
 - Split up main.rs
 - Make sure ffmpeg and symphonia are somehow exclusive (?)
+- Convert path in config to absolute path
+- Make `list-db` a table with as much info as possible
 
 ## Done
