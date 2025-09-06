@@ -125,7 +125,8 @@ checksum = "5c8214115b7bf84099f1309324e63141d4c5d7cc26862f97a0a857dbefe165bd"
 [[package]]
 name = "bliss-audio"
 version = "0.11.0"
-source = "git+https://github.com/Polochon-street/bliss-rs/#4ee987d773c02ef2c5931fd6322a70bc735059da"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35fa0f97e45afff775434654945ae8e971a2977009d9d38ff616bb674a60d93e"
 dependencies = [
  "adler32",
  "anyhow",
@@ -173,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "blissify"
-version = "0.5.6"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",

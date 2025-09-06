@@ -1,6 +1,6 @@
 [package]
 name = "blissify"
-version = "0.5.6"
+version = "0.6.0"
 authors = ["Polochon-street <polochonstreet@gmx.fr>"]
 edition = "2021"
 license = "GPL-3.0-only"
@@ -27,7 +27,7 @@ integration-tests = ["bliss-audio/integration-tests"]
 symphonia = ["bliss-audio/symphonia-all", "bliss-audio/library", "bliss-audio/aubio-static"]
 
 [dependencies]
-bliss-audio = {git = "https://github.com/Polochon-street/bliss-rs/", default-features = false}
+bliss-audio = {version = "0.11.0", default-features = false}
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
