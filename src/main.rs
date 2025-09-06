@@ -7,12 +7,14 @@
 //! Playlists can then subsequently be made from the current song using
 //! --playlist.
 use anyhow::{bail, Context, Result};
-use bliss_audio::library::{AppConfigTrait, BaseConfig, Library, LibrarySong, ProcessingError};
+use bliss_audio::library::{
+    AppConfigTrait, BaseConfig, Library, LibrarySong, ProcessingError, SanityError,
+};
 use bliss_audio::playlist::{
     closest_to_songs, cosine_distance, euclidean_distance, mahalanobis_distance_builder,
     song_to_song, DistanceMetricBuilder,
 };
-use bliss_audio::{BlissError, BlissResult};
+use bliss_audio::{AnalysisOptions, BlissError, BlissResult, FeaturesVersion};
 use clap::{App, Arg, ArgMatches, SubCommand};
 use log::warn;
 use mpd::search::{Query, Term, Window};
@@ -73,9 +75,9 @@ impl Config {
         mpd_base_path: PathBuf,
         config_path: Option<PathBuf>,
         database_path: Option<PathBuf>,
-        number_cores: Option<NonZeroUsize>,
+        analysis_options: Option<AnalysisOptions>,
     ) -> Result<Self> {
-        let base_config = BaseConfig::new(config_path, database_path, number_cores)?;
+        let base_config = BaseConfig::new(config_path, database_path, analysis_options)?;
         Ok(Self {
             base_config,
             mpd_base_path,
@@ -265,9 +267,9 @@ impl MPDLibrary {
         mpd_base_path: PathBuf,
         config_path: Option<PathBuf>,
         database_path: Option<PathBuf>,
-        number_cores: Option<NonZeroUsize>,
+        analysis_options: Option<AnalysisOptions>,
     ) -> Result<Self> {
-        let config = Config::new(mpd_base_path, config_path, database_path, number_cores)?;
+        let config = Config::new(mpd_base_path, config_path, database_path, analysis_options)?;
         let library = Library::new(config)?;
         let mpd_library = MPDLibrary {
             library,
@@ -807,6 +809,20 @@ fn parse_number_cores(matches: &ArgMatches) -> Result<Option<NonZeroUsize>, Blis
         .map_err(|_| BlissError::ProviderError(String::from("Number of cores must be positive")))
 }
 
+fn parse_features_version(matches: &ArgMatches) -> Result<Option<FeaturesVersion>, BlissError> {
+    matches
+        .value_of("algorithm-version")
+        .map(|s| {
+            let n: u16 = s
+                .parse()
+                .map_err(|e: std::num::ParseIntError| BlissError::ProviderError(e.to_string()))?;
+            FeaturesVersion::try_from(n).map_err(|_| {
+                BlissError::ProviderError("Algorithm version must be a valid number".into())
+            })
+        })
+        .transpose()
+}
+
 fn main() -> Result<()> {
     env_logger::init_from_env(env_logger::Env::default().filter_or("RUST_LOG", "warn"));
     let config_argument = Arg::with_name("config-path")
@@ -817,6 +833,8 @@ fn main() -> Result<()> {
             )
             .required(false)
             .takes_value(true);
+
+    let latest_features_version = (FeaturesVersion::LATEST as u16).to_string();
 
     let matches = App::new("blissify")
         .version(env!("CARGO_PKG_VERSION"))
@@ -868,6 +886,16 @@ Useful to avoid a too heavy load on a machine.")
                 .required(false)
                 .takes_value(true)
             )
+            .arg(Arg::with_name("algorithm-version")
+                .alias("features-version")
+                .long("algorithm-version")
+                .help(
+                    "The bliss algorithm / features version used to compute descriptors from songs.
+Defaults to the latest version, which is what you want in 99% of cases. Currently '1' and '2' are supported versions.")
+                .required(false)
+                .takes_value(true)
+                .default_value(&latest_features_version)
+            )
         )
         .subcommand(
             SubCommand::with_name("rescan")
@@ -881,6 +909,15 @@ Useful to avoid a too heavy load on a machine.")
                 .takes_value(true)
             )
             .about("(Re)scan completely an MPD library")
+            .arg(Arg::with_name("algorithm-version")
+                .alias("features-version")
+                .long("algorithm-version")
+                .help(
+                    "The bliss algorithm / features version used to compute descriptors from songs.
+Defaults to the latest version, which is what you want in 99% of cases. Currently '1' and '2' are supported versions.")
+                .required(false)
+                .takes_value(true)
+            )
         )
         .subcommand(
             SubCommand::with_name("update")
@@ -892,6 +929,13 @@ Useful to avoid a too heavy load on a machine.")
 Useful to avoid a too heavy load on a machine.")
                 .required(false)
                 .takes_value(true)
+            )
+            .arg(Arg::with_name("full")
+                .alias("update-features-version")
+                .short("f")
+                .long("full")
+                .help("Update all the songs to the latest bliss algorithm / features version. If songs are already analyzed in the database with a previous bliss algorithm, this option will re-analyze them with the latest features. Without this option, songs will be analyzed with the bliss algorithm version from the previous analysis, regardless if it's the latest or not.")
+                .takes_value(false)
             )
             .about("Scan new songs that were added to the MPD library since last scan.")
         )
@@ -988,8 +1032,50 @@ Defaults to 3, cannot be more than 9."
     if config_path.is_none() {
         config_path = matches.value_of("config-path").map(PathBuf::from);
     }
+
+    // We do this first since it's the only thing that doesn't require
+    // a pre-existing library.
+    if let Some(sub_m) = matches.subcommand_matches("init") {
+        let database_path = sub_m.value_of("database-path").map(PathBuf::from);
+        let number_cores = parse_number_cores(sub_m)?;
+        // For this one, it always defaults to FeaturesVersion::LATEST.
+        let features_version: FeaturesVersion = parse_features_version(sub_m)?.unwrap();
+
+        let analysis_options = if let Some(c) = number_cores {
+            AnalysisOptions {
+                number_cores: c,
+                features_version: features_version,
+            }
+        } else {
+            AnalysisOptions {
+                features_version,
+                ..Default::default()
+            }
+        };
+        let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
+        let mut library = MPDLibrary::new(
+            PathBuf::from(base_path),
+            config_path,
+            database_path,
+            Some(analysis_options),
+        )?;
+
+        library.full_rescan()?;
+        return Ok(());
+    }
+
+    let mut library = MPDLibrary::from_config_path(config_path)?;
+
+    let report = library.library.version_sanity_check()?;
+
+    for error in report {
+        match error {
+            SanityError::MultipleVersionsInDB { .. } => warn!("Database is not clean, songs were analyzed with different versions. Run `blissify rescan` or `blissify update --full` to rescan your entire library and fix the issue."),
+            SanityError::OldFeaturesVersionInDB { .. } => warn!("Songs can be analyzed with a more recent version of bliss-rs algorithm. Blissify will continue working as usual, but consider rescanning the library with `blissify rescan` or `blissify update --full` to benefit from the latest features updates."),
+        }
+    }
+
     if let Some(sub_m) = matches.subcommand_matches("list-db") {
-        let library = MPDLibrary::from_config_path(config_path)?;
         let mut songs: Vec<LibrarySong<()>> = library.library.songs_from_library()?;
         songs.sort_by_key(
             |x: &LibrarySong<_>| match x.bliss_song.path.to_str().as_ref() {
@@ -1009,7 +1095,6 @@ Defaults to 3, cannot be more than 9."
             }
         }
     } else if matches.subcommand_matches("list-errors").is_some() {
-        let library = MPDLibrary::from_config_path(config_path)?;
         let mut failed_songs: Vec<ProcessingError> = library.library.get_failed_songs()?;
         if failed_songs.is_empty() {
             println!("No errors were found from previous analyses.");
@@ -1019,33 +1104,29 @@ Defaults to 3, cannot be more than 9."
                 println!("{}: {}", error.song_path.display(), error.error);
             }
         }
-    } else if let Some(sub_m) = matches.subcommand_matches("init") {
-        let database_path = sub_m.value_of("database-path").map(PathBuf::from);
-        let number_cores = parse_number_cores(sub_m)?;
-        let base_path = sub_m.value_of("MPD_BASE_PATH").unwrap();
-        let mut library = MPDLibrary::new(
-            PathBuf::from(base_path),
-            config_path,
-            database_path,
-            number_cores,
-        )?;
-
-        library.full_rescan()?;
     } else if let Some(sub_m) = matches.subcommand_matches("rescan") {
-        let mut library = MPDLibrary::from_config_path(config_path)?;
         let number_cores = parse_number_cores(sub_m)?;
+        let features_version = parse_features_version(sub_m)?;
         if let Some(cores) = number_cores {
             library.library.config.set_number_cores(cores)?;
         };
+        if let Some(fv) = features_version {
+            library.library.config.set_features_version(fv)?;
+        }
         library.full_rescan()?;
     } else if let Some(sub_m) = matches.subcommand_matches("update") {
-        let mut library = MPDLibrary::from_config_path(config_path)?;
         let number_cores = parse_number_cores(sub_m)?;
 
         if let Some(cores) = number_cores {
             library.library.config.set_number_cores(cores)?;
         };
         let paths = library.get_songs_paths()?;
+        if sub_m.is_present("full") {
+            library
+                .library
+                .config
+                .set_features_version(FeaturesVersion::LATEST)?;
+        }
         library.library.update_library(paths, true, true)?;
     } else if let Some(sub_m) = matches.subcommand_matches("playlist") {
         let number_songs = match sub_m.value_of("NUMBER_SONGS").unwrap().parse::<usize>() {
@@ -1055,7 +1136,6 @@ Defaults to 3, cannot be more than 9."
             Ok(n) => n,
         };
 
-        let library = MPDLibrary::from_config_path(config_path)?;
         let dry_run = sub_m.is_present("dry-run");
         let no_dedup = sub_m.is_present("no-dedup");
         let keep_queue = sub_m.is_present("keep-queue");
@@ -1123,7 +1203,6 @@ Defaults to 3, cannot be more than 9."
         }
     } else if let Some(sub_m) = matches.subcommand_matches("interactive-playlist") {
         let number_choices: usize = sub_m.value_of("choices").unwrap_or("3").parse()?;
-        let mut library = MPDLibrary::from_config_path(config_path)?;
         if sub_m.is_present("continue") {
             library.make_interactive_playlist(true, number_choices)?;
         } else {
@@ -1138,7 +1217,7 @@ Defaults to 3, cannot be more than 9."
 #[cfg(test)]
 mod test {
     use super::*;
-    use bliss_audio::{Analysis, Song};
+    use bliss_audio::{Analysis, FeaturesVersion, Song};
     use mpd::error::Result;
     use mpd::song::{Id, QueuePlace, Song as MPDSong};
     use mpd::Status;
@@ -1252,7 +1331,10 @@ mod test {
             "path".into(),
             Some(config_file),
             Some(database_file),
-            Some(NonZeroUsize::new(1).unwrap()),
+            Some(AnalysisOptions {
+                number_cores: NonZeroUsize::new(1).unwrap(),
+                features_version: bliss_audio::FeaturesVersion::Version1,
+            }),
         )
         .unwrap();
         (library, config_dir)
@@ -1267,7 +1349,7 @@ mod test {
                 .execute(
                     "
                 insert into song (id, path, title, artist, album, genre, analyzed, version, duration, extra_info) values
-                    (1,'path/first_song.flac', 'First Song', 'Art Ist', 'Al Bum', 'Techno', true, 2, 50, null);
+                    (1,'path/first_song.flac', 'First Song', 'Art Ist', 'Al Bum', 'Techno', true, 1, 50, null);
                 ",
                     [],
                 )
@@ -1312,9 +1394,13 @@ mod test {
             }),
             ..Default::default()
         };
-        let analysis = Analysis::new([
-            0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.3,
-        ]);
+        let analysis = Analysis::new(
+            vec![
+                0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.3,
+            ],
+            FeaturesVersion::Version1,
+        )
+        .unwrap();
         let song = library.mpd_to_bliss_song(&mpd_song).unwrap().unwrap();
         let expected_song = LibrarySong {
             extra_info: (),
@@ -1325,7 +1411,7 @@ mod test {
                 album: Some(String::from("Al Bum")),
                 genre: Some(String::from("Techno")),
                 analysis,
-                features_version: 2,
+                features_version: bliss_audio::FeaturesVersion::Version1,
                 duration: Duration::from_secs(50),
                 ..Default::default()
             },
@@ -1345,7 +1431,7 @@ mod test {
             vec![ProcessingError {
                 song_path: "data/foo".into(),
                 error: "error happened while decoding file - while opening format for file 'data/foo': ffmpeg::Error(2: No such file or directory).".into(),
-                features_version: 1,
+                features_version: FeaturesVersion::Version1
             }],
         )
         } else if cfg!(feature = "symphonia") {
@@ -1354,7 +1440,7 @@ mod test {
             vec![ProcessingError {
                 song_path: "data/foo".into(),
                 error: "error happened while decoding file - IO Error: No such file or directory (os error 2)".into(),
-                features_version: 1,
+                features_version: FeaturesVersion::Version1,
             }],
         )
         }
@@ -1630,8 +1716,8 @@ mod test {
                 .execute(
                     "
                 insert into song (id, path, analyzed, version) values
-                    (1, 'data/s16_mono_22_5kHz.flac', true, 1),
-                    (10, 'data/coucou.flac', true, 1)
+                    (1, 'data/s16_mono_22_5kHz.flac', true, 2),
+                    (10, 'data/coucou.flac', true, 2)
                 ",
                     [],
                 )
@@ -1745,7 +1831,18 @@ mod test {
         }
 
         let paths = library.get_songs_paths().unwrap();
-        library.library.update_library(paths, true, true).unwrap();
+        library
+            .library
+            .update_library_with_options(
+                paths,
+                true,
+                true,
+                AnalysisOptions {
+                    features_version: FeaturesVersion::Version2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
 
         let sqlite_conn = library.library.sqlite_conn.lock().unwrap();
         let mut stmt = sqlite_conn

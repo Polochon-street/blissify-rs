@@ -1,5 +1,8 @@
 # Changelog
 
+## blissify 0.6.0
+* Bump bliss-rs version in order to use the new chroma features.
+
 ## blissify 0.5.6
 * Bump the `indicatif` crate to fix compilation.
 

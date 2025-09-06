@@ -27,7 +27,7 @@ integration-tests = ["bliss-audio/integration-tests"]
 symphonia = ["bliss-audio/symphonia-all", "bliss-audio/library", "bliss-audio/aubio-static"]
 
 [dependencies]
-bliss-audio = {version = "0.10.1", default-features = false}
+bliss-audio = {git = "https://github.com/Polochon-street/bliss-rs/", default-features = false}
 mpd = "0.1.0"
 dirs = "3.0.1"
 tempdir = "0.3.7"
